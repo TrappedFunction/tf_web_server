@@ -5,9 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
-#include "buffer.h"
-#include <fstream>
-#include <sstream>
+#include <string>
 
 Server::Server(uint16_t port) : port_(port){
     // 创建Socket监听
@@ -43,92 +41,100 @@ Server::~Server() = default; // Socket的销毁由unique_ptr处理
 
 void Server::start(){
     while(true){
-        struct sockaddr_in client_addr;
-        socklen_t client_len = sizeof(client_addr);
-
-        // 接受连接，client_fd是新的socket描述符，用于与此客户通信
-        int client_fd = ::accept(listen_socket_->getFd(), (struct sockaddr*)&client_addr, &client_len);
-
-        if(client_fd < 0){
-            perror("accept() error");
-            continue; // 继续等待下一个连接
-        }
-
-        std::cout << "New client connected, fd" << client_fd << std::endl;
-        handleConnection(client_fd);
+        handleConnection();
     }
 }
 
-void Server::httpHandler(const HttpRequest& req, HttpResponse& resp){
-    std::string file_path = "../www" + req.getPath();
+void Server::handleConnection(){
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
 
-    // TODO根据请求的路径，决定如何填充response
-    if(req.getMethod() != HttpRequest::GET){
-        resp.setStatusCode(HttpResponse::k404NotFound);
-        resp.setStatusMessage("Not Found");
-        resp.setBody("<html><body><h1>404 Not Found</h1></body></html>");
-        resp.setContentType("text/html");
+    int client_fd = ::accept(listen_socket_->getFd(), (struct sockaddr*)&client_addr, &client_len);
+    if(client_fd < 0){
+        perror("accept error");
         return;
     }
 
-    std::ifstream file(file_path);
-    if(file.is_open()){
-        std::stringstream ss;
-        ss << file.rdbuf();
-        resp.setStatusCode(HttpResponse::k2000k);
-        resp.setStatusMessage("OK");
-        resp.setBody(ss.str());
-        // TODO简单的MIME类型判断
-        if(file_path.find(".html") != std::string::npos){
-            resp.setContentType("text/html");
-        }else if(file_path.find(".txt") != std::string::npos){
-            resp.setContentType("text/plain"); // 标准的纯文本文件
-        }else{
-            resp.setContentType("application/octet-stream"); // 二进制流数据，文件传输异常或服务器配置特殊下载方式
+    std::cout << "Accepted new connection from client, fd=" << client_fd << std::endl;
+
+    // 创建一个新的Connection对象来管理这个连接
+    ConnectionPtr conn = std::make_shared<Connection>(this, client_fd, client_addr);
+
+    // 设置回调函数
+    conn->setConnectionCallback(connection_callback_);
+    conn->setMessageCallback(message_callback_);
+    conn->setCloseCallback(std::bind(&Server::removeConnection, this, std::placeholders::_1));
+
+    // 将新的连接加入map管理
+    connections_[client_fd] = conn;
+
+    // 触发连接建立回调
+    conn->connectionEstablished();
+
+    // 在阻塞模型下，必须处理完整个连接
+    // 循环处理该连接的读事件，直到关闭
+    while(connections_.count(client_fd)){
+        conn->handleRead();
+    }
+}
+
+void Server::removeConnection(const ConnectionPtr& conn){
+    if(conn){
+        int fd = conn->socket_->getFd();
+        if(connections_.count(fd)){
+            connections_.erase(fd);
+            std::cout << "Removed connection fd=" << fd << "from server." << std::endl;
         }
-    }else{
-        resp.setStatusCode(HttpResponse::k404NotFound);
-        resp.setStatusMessage("Not Found");
-        resp.setBody("<html><body><h1>404 Not Found</h1><h2>File not found at" + req.getPath() + "</h2></body></html>");
-        resp.setContentType("text/html");
     }
 }
 
-void Server::handleConnection(int client_fd){
-    // 使用RAII管理客户端连接的socket
-    Socket client_socket(client_fd);
-    char read_buffer[1024];
-    bzero(read_buffer, sizeof(read_buffer));
+// void Server::httpHandler(const HttpRequest& req, HttpResponse& resp){
+    
+//     std::string req_path = req.getPath();
+//     // 安全检测：req_path路径是否包含“..”
+//     if(req_path.find("..") != std::string::npos){
+//         // 恶意请求，返回400 Bad Request
+//         // TODO ...
+//         return;
+//     }
+//     extern std::string base_path;
+//     //安全检测：规范化路径并检测是否仍在根目录下
+//     std::filesystem::path full_path = std::filesystem::weakly_canonical(base_path + req_path);
+//     if(full_path.string().rfind(std::filesystem::weakly_canonical(base_path).string(), 0) != 0){
+//         // 试图访问根目录之外的文件，返回402 Forbidden
+//         // TODO...
+//         return;
+//     }
 
-    // TODO在阻塞模式下，我们假设一次read就能读取完一个完整的HTTP请求
-    ssize_t n = ::read(client_socket.getFd(), read_buffer, sizeof(read_buffer)-1);
-    if(n <= 0){
-        if(n < 0) perror("read() error");
-        return; // 出错或客户端关闭连接
-    }
+//     std::string file_path = full_path.string();
+//     // TODO根据请求的路径，决定如何填充response
+//     if(req.getMethod() != HttpRequest::GET){
+//         resp.setStatusCode(HttpResponse::k404NotFound);
+//         resp.setStatusMessage("Not Found");
+//         resp.setBody("<html><body><h1>404 Not Found</h1></body></html>");
+//         resp.setContentType("text/html");
+//         return;
+//     }
 
-    HttpRequest request;
-    if(!request.parse(std::string(read_buffer))){
-        // 解析失败，发送404响应
-        // TODO简化处理，直接关闭连接
-        std::cerr << "Failed to parse request" << std::endl;
-        return;
-    }
-
-    HttpResponse response;
-    httpHandler(request,response);
-
-    // 将response转换为字符串发送
-    // TODO直接使用拼接字符串，不使用Buffer类，简化当前阶段操作
-    std::string response_str = "HTTP/1.1 " + std::to_string(response.getStatusCode()) + " " + response.getStatusMessage() + "\r\n";
-    // TODO简化操作，没有实现添加Headers的逻辑
-    response_str += "Content-Length: " + std::to_string(response.getBody().length()) + "\r\n";
-    response_str += "\r\n";
-    response_str += response.getBody();
-
-    ssize_t written = ::write(client_socket.getFd(), response_str.c_str(), response_str.length());
-    if(written < 0){
-        perror("write() error");
-    }
-    // 短连接，处理完一个请求就断开连接
-}
+//     std::ifstream file(file_path);
+//     if(file.is_open()){
+//         std::stringstream ss;
+//         ss << file.rdbuf();
+//         resp.setStatusCode(HttpResponse::k2000k);
+//         resp.setStatusMessage("OK");
+//         resp.setBody(ss.str());
+//         // TODO简单的MIME类型判断
+//         if(file_path.find(".html") != std::string::npos){
+//             resp.setContentType("text/html");
+//         }else if(file_path.find(".txt") != std::string::npos){
+//             resp.setContentType("text/plain"); // 标准的纯文本文件
+//         }else{
+//             resp.setContentType("application/octet-stream"); // 二进制流数据，文件传输异常或服务器配置特殊下载方式
+//         }
+//     }else{
+//         resp.setStatusCode(HttpResponse::k404NotFound);
+//         resp.setStatusMessage("Not Found");
+//         resp.setBody("<html><body><h1>404 Not Found</h1><h2>File not found at" + req.getPath() + "</h2></body></html>");
+//         resp.setContentType("text/html");
+//     }
+// }
