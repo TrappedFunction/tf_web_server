@@ -1,4 +1,5 @@
 #include "server.h"
+#include "net/event_loop.h"
 #include "http_utils.h"
 #include "http_request.h"
 #include "http_response.h"
@@ -108,13 +109,16 @@ int main(int argc, char* argv[]){
     }
 
     try{
+        EventLoop loop;
         uint16_t port = std::stoi(argv[1]);
-        Server my_server(port);
+        Server my_server(&loop, port);
 
         my_server.setConnectionCallback(onConnection);
         my_server.setMessageCallback(onMessage);
         
         my_server.start();
+        // 启动事件循环
+        loop.loop();
     }catch(const std::exception& e){
         // 异常处理代码
         std::cerr << "Exception caught in main: " << e.what() << std::endl;

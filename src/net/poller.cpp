@@ -30,7 +30,7 @@ void Poller::poll(int timeout_ms, ChannelList* active_channels){
 
     if(num_events > 0){
         for(int i = 0; i < num_events; i++){
-            Channel* channel = static_cast<Channel*>(events_[1].data.ptr);
+            Channel* channel = static_cast<Channel*>(events_[i].data.ptr);
             // 利用epoll_event.data.ptr可以直接存储指针
             channel->set_revents(events_[i].events);
             active_channels->push_back(channel);
@@ -72,7 +72,14 @@ void Poller::removeChannel(Channel* channel){
     assert(channels_.find(fd) != channels_.end());
     assert(channels_[fd] == channel);
 
-    channels_.erase(fd);
+    size_t n = channels_.erase(fd);
+    assert(n == 1);
+
+    if(channel->isNoneEvent()){
+        // 如果channel已经没有监听事件，epoll_ctl(DEL)会失败
+        // TODO可以在这里直接返回，或者依赖update的逻辑
+        // return;
+    }
     update(EPOLL_CTL_DEL, channel);
 }
 

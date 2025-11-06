@@ -38,6 +38,7 @@ void EventLoop::loop(){
         for(Channel* channel : active_channels_){
             channel->handleEvent();
         }
+        // doPendingFunctors(); // 处理挂起的任务
     }
 
     looping_ = false;
@@ -58,6 +59,32 @@ void EventLoop::removeChannel(Channel* channel){
     assert(channel->ownerLoop() == this);
     assertInLoopThread();
     poller_->removeChannel(channel);
+    // runInLoop(std::bind(&Poller::removeChannel, poller_.get(), channel));
+}
+
+void EventLoop::runInLoop(Functor cb){
+    if(isInLoopThread()){
+        cb();
+    }else{
+        // TODO跨线程调用，需要唤醒
+    }
+}
+
+void EventLoop::queueInLoop(Functor cb){
+    std::lock_guard<std::mutex> lock(mutex_);
+    pending_functors_.push_back(std::move(cb));
+    // TODO
+}
+
+void EventLoop::doPendingFunctors(){
+    std::vector<Functor> functors;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        functors.swap(pending_functors_);
+    }
+    for(const Functor& functor : functors){
+        functor();
+    }
 }
 
 void EventLoop::abortNotInLoopThread(){

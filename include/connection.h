@@ -1,8 +1,10 @@
 #pragma once
-#include <memory>
-#include <functional>
+#include "net/event_loop.h"
+#include "net/channel.h"
 #include "socket.h"
 #include "buffer.h"
+#include <memory>
+#include <functional>
 #include <netinet/in.h>
 
 class Server;
@@ -10,12 +12,14 @@ class Server;
 // 对象由share_ptr管理
 class Connection : public std::enable_shared_from_this<Connection>{
 public:
+    enum StateE { kConnecting, kConnected, kDisconnecting, kDisconnected };
+
     using ConnectionPtr = std::shared_ptr<Connection>;
     using ConnectionCallback = std::function<void(const ConnectionPtr&)>;
     using MessageCallback = std::function<void(const ConnectionPtr&, Buffer*)>;
     using closeCallback = std::function<void(const ConnectionPtr&)>;
 
-    Connection(Server* server, int sockfd, const struct sockaddr_in& peer_addr);
+    Connection(EventLoop* loop, int sockfd, const struct sockaddr_in& peer_addr);
     ~Connection();
     
     void send(const std::string& msg);
@@ -34,6 +38,14 @@ public:
 
     // 关闭连接的公共接口
     void shutdown();
+
+    // 设置当前连接的状态
+    void setState(StateE s) { state_ = s; }
+
+    // 让Server可以获得Channel
+    Channel* getChannel() const { return channel_.get(); }
+    int getFd() const { return socket_->getFd(); }
+    EventLoop* getLoop() const { return loop_; }
 private:
     // 在Server主循环中被调用，处理读事件
     void handleRead();
@@ -43,11 +55,13 @@ private:
     void handleClose();
     // 处理错误事件
     void handleError();
-    // 允许Server访问私有成员
-    friend class Server;
+    
+    void sendInLoop(const std::string& msg);
+    void shutdownInLoop();
 
-    Server* server_; // 指向所属的Server
+    EventLoop* loop_; // 每个Connection都知道自己的EventLoop
     std::unique_ptr<Socket> socket_;
+    std::unique_ptr<Channel> channel_; // 每个connection拥有一个Channel
     Buffer input_buffer_;
     Buffer output_buffer_;
 
@@ -56,4 +70,5 @@ private:
     closeCallback close_callback_;
 
     struct sockaddr_in peer_addr_;
+    StateE state_;
 };

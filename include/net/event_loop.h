@@ -33,9 +33,13 @@ public:
     }
 
     bool isInLoopThread() const { return thread_id_ == std::this_thread::get_id(); }
+    void runInLoop(Functor cb);
+    void queueInLoop(Functor cb);
 
 private:
     void abortNotInLoopThread();
+    void doPendingFunctors();
+    
 
     using ChannelList = std::vector<Channel*>;
 
@@ -45,4 +49,6 @@ private:
 
     std::unique_ptr<Poller> poller_;
     ChannelList active_channels_;
+    std::vector<Functor> pending_functors_;
+    std::mutex mutex_;
 };

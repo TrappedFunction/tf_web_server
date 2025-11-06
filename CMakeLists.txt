@@ -8,6 +8,6 @@ set(CMAKE_BUILD_TYPE Debug)
 
 add_executable(server src/main.cpp src/server.cpp src/socket.cpp
                     src/http_request.cpp src/http_response.cpp
-                    src/connection.cpp src/buffer.cpp
-                    src/mime_types.cpp)
+                    src/connection.cpp src/buffer.cpp src/mime_types.cpp
+                    src/net/channel.cpp src/net/event_loop.cpp src/net/poller.cpp)
 target_include_directories(server PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
