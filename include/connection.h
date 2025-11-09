@@ -6,6 +6,7 @@
 #include <memory>
 #include <functional>
 #include <netinet/in.h>
+#include <any> // cpp17 用于存储定时器上下文, 类型安全的方式持有任何类型的值
 
 class Server;
 
@@ -46,6 +47,11 @@ public:
     Channel* getChannel() const { return channel_.get(); }
     int getFd() const { return socket_->getFd(); }
     EventLoop* getLoop() const { return loop_; }
+
+    // 用于存储上下文，即TimerId
+    void setContext(const std::any& context) { context_ = context; }
+    const std::any& getContext() const { return context_; 
+    }
 private:
     // 在Server主循环中被调用，处理读事件
     void handleRead();
@@ -71,4 +77,5 @@ private:
 
     struct sockaddr_in peer_addr_;
     StateE state_;
+    std::any context_;
 };

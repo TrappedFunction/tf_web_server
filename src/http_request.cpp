@@ -124,3 +124,15 @@ std::string HttpRequest::getHeader(const std::string& key) const{
     auto it = headers_.find(key);
     return it == headers_.end() ? "" : it->second;
 }
+
+bool HttpRequest::keepAlive() const {
+    std::string connection = getHeader("Connection");
+    if(connection == "close"){
+        return false;
+    }
+    if(version_ == "HTTP/1.0"){
+        return connection == "Keep-Alive";
+    }
+    // 对于HTTP/1.1默认Keep-Alive
+    return true;
+}

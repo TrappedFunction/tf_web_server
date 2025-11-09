@@ -1,6 +1,7 @@
 #include "net/event_loop.h"
 #include "net/channel.h"
 #include "net/poller.h"
+#include "net/timer.h"
 #include <cassert>
 #include <iostream>
 
@@ -11,7 +12,8 @@ EventLoop::EventLoop()
     : looping_(false),
       quit_(false),
       thread_id_(std::this_thread::get_id()),
-      poller_(new Poller(this)){
+      poller_(new Poller(this)),
+      timer_queue_(new TimerQueue(this)){
         if(t_loop_in_this_thread){
             // Log FATAL: Another EventLoop exists in this thread
             exit(1);
@@ -33,12 +35,21 @@ void EventLoop::loop(){
 
     while(!quit_){
         active_channels_.clear();
-        poller_->poll(10000, &active_channels_); // 10秒超时
+        // 计算poll的超时时间
+        Timestamp earliest = timer_queue_->getEarliestExpiration();
+        int64_t timeout_ms = -1;
+        if(earliest.microSecondSinceEpoch() > 0){
+            int64_t diff = earliest.microSecondSinceEpoch() - Timestamp::now().microSecondSinceEpoch();
+            timeout_ms = (diff < 0) ? 0 : diff / 1000;
+        }
+        poller_->poll(static_cast<int>(timeout_ms), &active_channels_); // 10秒超时
 
         for(Channel* channel : active_channels_){
             channel->handleEvent();
         }
         // doPendingFunctors(); // 处理挂起的任务
+        // 处理到期的定时器
+        timer_queue_->handleExpireTimers();
     }
 
     looping_ = false;
@@ -92,4 +103,13 @@ void EventLoop::abortNotInLoopThread(){
             << " was created in threadId_ " << thread_id_
             << ", current thread id = " << std::this_thread::get_id() << std::endl;
     exit(1);
+}
+
+void EventLoop::runAt(Timestamp time, std::function<void()> cb){
+    timer_queue_->addTimer(std::move(cb), time);
+}
+
+void EventLoop::runAfter(double delay, std::function<void()> cb){
+    Timestamp time(addTime(Timestamp::now(), delay));
+    runAt(time, std::move(cb));
 }

@@ -9,6 +9,7 @@
 #include <fstream>
 
 std::string base_path;
+const int kIdleConnectionTimeout = 60; // 60秒空闲超时
 
 // 处理http请求
 void onHttpRequest(const HttpRequest& req, HttpResponse* resp){
@@ -69,6 +70,9 @@ void onMessage(const std::shared_ptr<Connection>& conn, Buffer* buf){
     if(request.gotAll()){
         HttpResponse response;
         response.addHeader("Server", "TF's Cpp Web Server");
+        bool keep_alive = request.keepAlive();
+        response.setKeepAlive(keep_alive);
+
         onHttpRequest(request, &response);
 
         Buffer response_buf;
@@ -76,15 +80,21 @@ void onMessage(const std::shared_ptr<Connection>& conn, Buffer* buf){
         conn->send(&response_buf);
 
         // HTTP/1.0短连接
-        // TODO 未来的Keep-alive中，将不再直接关闭
-        conn->shutdown();
+        // Keep-alive中，将不再直接关闭
+        if(keep_alive){
+            std::weak_ptr<Connection> weak_conn = conn;
+            conn->getLoop()->runAfter(kIdleConnectionTimeout, [weak_conn](){
+                std::shared_ptr<Connection> conn = weak_conn.lock();
+                if(conn){
+                    // 如果超时，服务器主动关闭连接
+                    conn->shutdown();
+                }
+            });
+        }else{
+            conn->shutdown();
+        }
+        
     }
-}
-
-// 当新连接建立或断开时调用
-void onConnection(const std::shared_ptr<Connection>& conn){
-    // 根据连接状态进行判断
-    std::cout << "New connection from [" << conn->getPeerAddrStr() << "]" << std::endl;
 }
 
 int main(int argc, char* argv[]){
@@ -113,7 +123,7 @@ int main(int argc, char* argv[]){
         uint16_t port = std::stoi(argv[1]);
         Server my_server(&loop, port);
 
-        my_server.setConnectionCallback(onConnection);
+        // my_server.setConnectionCallback(onConnection);
         my_server.setMessageCallback(onMessage);
         
         my_server.start();

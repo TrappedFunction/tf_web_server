@@ -25,6 +25,7 @@ public:
     // 设置回调
     void setConnectionCallback(const ConnectionCallback& cb) { connection_callback_ = cb; }
     void setMessageCallback(const MessageCallback& cb) { message_callback_ = cb; }
+    void onConnection(const ConnectionPtr& conn);
 private:
     // 处理新的连接的建立
     void handleConnection();
@@ -45,4 +46,5 @@ private:
 
     // 管理所有连接，key是sockfd
     std::map<int, ConnectionPtr> connections_;
+    const int kIdleConnectionTimeout = 60; // 60秒空闲超时
 };

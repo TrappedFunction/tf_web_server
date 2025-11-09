@@ -7,6 +7,8 @@
 
 class Channel;
 class Poller;
+class TimerQueue;
+class Timestamp;
 
 class EventLoop{
 public:
@@ -36,6 +38,11 @@ public:
     void runInLoop(Functor cb);
     void queueInLoop(Functor cb);
 
+    // 在指定时间运行回调
+    void runAt(Timestamp time, std::function<void()> cb);
+    // 在N秒后运行回调
+    void runAfter(double delay, std::function<void()> cb);
+
 private:
     void abortNotInLoopThread();
     void doPendingFunctors();
@@ -51,4 +58,5 @@ private:
     ChannelList active_channels_;
     std::vector<Functor> pending_functors_;
     std::mutex mutex_;
+    std::unique_ptr<TimerQueue> timer_queue_;
 };

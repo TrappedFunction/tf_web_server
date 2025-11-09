@@ -21,6 +21,7 @@ void Server::start(){
     listen_socket_->listen();
     // accept_channel_注册到EventLoop中，开始监听新连接事件
     accept_channel_->enableReading();
+    setConnectionCallback(std::bind(&Server::onConnection, this, std::placeholders::_1));
     std::cout << "Server starts listening on port " << port_ << std::endl;
 }
 
@@ -76,4 +77,18 @@ void Server::removeConnectionInLoop(const ConnectionPtr& conn){
     // 此时从Channel触发的事件已经处理完毕，可以安全移除Channel
     EventLoop* io_loop = conn->getLoop();
     io_loop->removeChannel(conn->getChannel());
+}
+
+// 当新连接建立或断开时调用
+void Server::onConnection(const ConnectionPtr& conn){
+    // 根据连接状态进行判断
+    std::cout << "New connection from [" << conn->getPeerAddrStr() << "]" << std::endl;
+    // 为新连接设置初始的超时定时器
+    std::weak_ptr<Connection> weak_conn = conn;
+    conn->getLoop()->runAfter(kIdleConnectionTimeout, [weak_conn](){
+        std::shared_ptr<Connection> conn = weak_conn.lock();
+        if(conn){
+            conn->shutdown();
+        }
+    });
 }

@@ -25,6 +25,7 @@ public:
     const std::unordered_map<std::string, std::string>& getHeaders() const { return headers_; }
 
     void reset();
+    bool keepAlive() const;
 
 private:
     bool parseRequestLine(const char* begin, const char* end);

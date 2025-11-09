@@ -28,7 +28,7 @@ public:
     // 添加Connection头为Keep-Alive做准备
     void setKeepAlive(bool on){
         if(on) addHeader("Connection", "Keep-Alive");
-        else addHeader("Connection", "Close");
+        else addHeader("Connection", "close");
     }
     HttpStatusCode getStatusCode() const { return status_code_; }
     std::string getStatusMessage() const { return status_message_; } 
