@@ -4,6 +4,8 @@
 #include <thread>
 #include <mutex>
 #include <functional>
+#include "net/timer.h"
+#include "utils/timestamp.h"
 
 class Channel;
 class Poller;
@@ -39,9 +41,11 @@ public:
     void queueInLoop(Functor cb);
 
     // 在指定时间运行回调
-    void runAt(Timestamp time, std::function<void()> cb);
+    TimerId runAt(Timestamp time, std::function<void()> cb);
     // 在N秒后运行回调
-    void runAfter(double delay, std::function<void()> cb);
+    TimerId runAfter(double delay, std::function<void()> cb);
+    // 取消定时器连接
+    void cancel(TimerId timer_id);
 
 private:
     void abortNotInLoopThread();

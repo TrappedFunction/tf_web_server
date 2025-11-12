@@ -3,6 +3,7 @@
 #include "net/channel.h"
 #include "socket.h"
 #include "buffer.h"
+#include "utils/timestamp.h"
 #include <memory>
 #include <functional>
 #include <netinet/in.h>
@@ -50,8 +51,11 @@ public:
 
     // 用于存储上下文，即TimerId
     void setContext(const std::any& context) { context_ = context; }
-    const std::any& getContext() const { return context_; 
-    }
+    const std::any& getContext() const { return context_; }
+
+    // 用于超时管理的方法
+    void updateLastActiveTime() { last_active_time_ = Timestamp::now(); }
+    Timestamp getLastActiveTime() const { return last_active_time_; }
 private:
     // 在Server主循环中被调用，处理读事件
     void handleRead();
@@ -78,4 +82,6 @@ private:
     struct sockaddr_in peer_addr_;
     StateE state_;
     std::any context_;
+    
+    Timestamp last_active_time_;
 };

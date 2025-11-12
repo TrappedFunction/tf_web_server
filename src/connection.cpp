@@ -1,4 +1,5 @@
 #include "connection.h"
+#include "net/timer.h"
 #include <iostream>
 #include <cerrno>
 #include <arpa/inet.h>
@@ -8,7 +9,8 @@ Connection::Connection(EventLoop* loop, int sockfd, const struct sockaddr_in& pe
     socket_(std::make_unique<Socket>(sockfd)), 
     channel_(std::make_unique<Channel>(loop, sockfd)),
     peer_addr_(peer_addr),
-    state_(kConnecting){
+    state_(kConnecting),
+    last_active_time_(Timestamp::now()){
         
 }
 
@@ -117,39 +119,70 @@ void Connection::send(Buffer* buf){
 void Connection::handleRead(){
     loop_->assertInLoopThread();
     int saved_errno = 0;
-    ssize_t n = input_buffer_.readFd(socket_->getFd(), &saved_errno);
 
-    if(n > 0){
-        // 成功读到了数据，调用上层设置的message callback
-        if(message_callback_){
-            message_callback_(shared_from_this(), &input_buffer_);
+    // 循环读取所有数据，直到缓冲区为空
+    while(true){
+        ssize_t n = input_buffer_.readFd(socket_->getFd(), &saved_errno);
+
+        if(n > 0){
+            // 成功读到了n字节数据，循环继续，尝试继续读取
+            updateLastActiveTime();
+        }else if(n == 0){
+            // 客户端关闭连接
+            handleClose();
+            break;
+        }else{
+            // 读取错误
+            if(saved_errno == EAGAIN || saved_errno == EWOULDBLOCK){
+                // socket内核缓冲区的数据已经全部读完
+                std::cout << "ET mode : read all data from fd=" << socket_->getFd() << std::endl;
+                break;
+            }else{
+                errno = saved_errno;
+                std::cerr << "Connection::handleRead error" << std::endl;
+                handleError();
+                break;
+            }
+            
         }
-    }else if(n == 0){
-        // 客户端关闭连接
-        handleClose();
-    }else{
-        // 读取错误
-        errno = saved_errno;
-        std::cerr << "Connection::handleRead error" << std::endl;
-        handleError();
     }
+    if(input_buffer_.readableBytes() > 0){
+        message_callback_(shared_from_this(), &input_buffer_);
+    }
+    
 }
 
 
 void Connection::handleWrite(){
     loop_->assertInLoopThread();
     if(channel_->isWriting()){
-        ssize_t n = ::write(socket_->getFd(), output_buffer_.peek(), output_buffer_.readableBytes());
-        if(n > 0){
-            output_buffer_.retrieve(n);
-            if(output_buffer_.readableBytes() == 0){
-                // 数据发送完毕，必须停止监听可写事件，否则会busy-loop
-                channel_->disableWriting();
-                // 如果此时有关闭连接的计划，可以在这里执行
+        while(true){
+            size_t n = ::write(socket_->getFd(), output_buffer_.peek(), output_buffer_.readableBytes());
+            if(n > 0){
+                updateLastActiveTime();
+                output_buffer_.retrieve(n);
+                if(output_buffer_.readableBytes() == 0){
+                    // 数据发送完毕，必须停止监听可写事件，否则会busy-loop
+                    channel_->disableWriting();
+                    // 如果此时有关闭连接的计划，可以在这里执行
+                    if(state_ == kDisconnecting){
+                        socket_->shutdownWrite();
+                    }
+                    break;
+                }
+            }else{
+                if(errno == EAGAIN || errno == EWOULDBLOCK){
+                    // 内核缓冲区已满，不可再写
+                    // 保持enableWriteing状态，等待下一次可写通知
+                    std::cout << "ET mode : write buffer is full for fd=" << socket_->getFd() << std::endl;
+                }else{
+                    std::cerr << "Connection::handleWrite error" << std::endl;
+                    handleError();
+                }
+                break;
             }
-        }else{
-            // Log SYSERR
         }
+        
     }
 }
 
@@ -161,6 +194,11 @@ void Connection::handleClose(){
         ConnectionPtr guard_this(shared_from_this());
         // 仍然需要通知上层连接已关闭
         std::cout << "Connection from [" << getPeerAddrStr() << "] is closing." << std::endl;
+        // 关闭连接时，取消与之关联的定时器
+        if(context_.has_value()){
+            TimerId timer_id = std::any_cast<TimerId>(context_);
+            loop_->cancel(timer_id);
+        }
 
         close_callback_(guard_this);
         // loop_->removeChannel(channel_.get());

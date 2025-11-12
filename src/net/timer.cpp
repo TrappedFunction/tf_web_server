@@ -1,12 +1,35 @@
 #include "net/timer.h"
 #include "net/event_loop.h"
 #include <vector>
+#include <cassert>
 
 TimerQueue::TimerQueue(EventLoop* loop) : loop_(loop){}
-TimerQueue::~TimerQueue() {}
+TimerQueue::~TimerQueue() {
+    for(const auto& timer_ptr : active_timers_){
+        delete timer_ptr;
+    }
+}
 
-void TimerQueue::addTimer(TimerCallback cb, Timestamp when){
-    timers_.insert({when, std::make_unique<Timer>(std::move(cb), when)});
+TimerId TimerQueue::addTimer(TimerCallback cb, Timestamp when){
+    TimerId timer = new Timer(std::move(cb), when);
+    loop_->runInLoop([this, timer, when](){
+        auto result = active_timers_.insert(timer);
+        assert(result.second);
+        timers_.insert({when, timer});
+    });
+    return timer;
+}
+
+void TimerQueue::cancel(TimerId timer_id){
+    loop_->runInLoop([this, timer_id](){
+        if(active_timers_.count(timer_id)){
+            // 从两个set中都移除
+            timers_.erase({timer_id->expiration(), timer_id});
+            active_timers_.erase(timer_id);
+            // 释放内存
+            delete timer_id;
+        }
+    });
 }
 
 Timestamp TimerQueue::getEarliestExpiration() const {
@@ -19,18 +42,24 @@ Timestamp TimerQueue::getEarliestExpiration() const {
 void TimerQueue::handleExpireTimers(){
     loop_->assertInLoopThread();
     Timestamp now = Timestamp::now();
-    std::vector<std::unique_ptr<Timer>> expired_timers;
+    std::vector<TimerId> expired_timers;
 
     // 找出所有到期的定时器
     auto end = timers_.lower_bound({addTime(now, 0.000001), nullptr});
-    for(auto it = timers_.begin(); it != end; ){
-        // 使用extract挖出节点
-        auto node_handle = timers_.extract(it++);
-        expired_timers.push_back(std::move(node_handle.value().second));
+    for(auto it = timers_.begin(); it != end; it++){
+        expired_timers.push_back(it->second);
     }
+
+    // 从set中移除
+    timers_.erase(timers_.begin(), end);
+    for(const auto&timer : expired_timers){
+        active_timers_.erase(timer);
+    }
+
 
     // 调用到期定时器的回调
     for(const auto& entry : expired_timers){
         entry->run();
+        delete entry;
     }
 }

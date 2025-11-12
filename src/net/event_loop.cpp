@@ -105,11 +105,15 @@ void EventLoop::abortNotInLoopThread(){
     exit(1);
 }
 
-void EventLoop::runAt(Timestamp time, std::function<void()> cb){
-    timer_queue_->addTimer(std::move(cb), time);
+TimerId EventLoop::runAt(Timestamp time, std::function<void()> cb){
+    return timer_queue_->addTimer(std::move(cb), time);
 }
 
-void EventLoop::runAfter(double delay, std::function<void()> cb){
+TimerId EventLoop::runAfter(double delay, std::function<void()> cb){
     Timestamp time(addTime(Timestamp::now(), delay));
-    runAt(time, std::move(cb));
+    return runAt(time, std::move(cb));
+}
+
+void EventLoop::cancel(TimerId timer_id){
+    timer_queue_->cancel(timer_id);
 }

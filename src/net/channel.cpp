@@ -4,7 +4,7 @@
 #include <cassert>
 
 const int Channel::kNoneEvent = 0;
-const int Channel::kReadEvent = EPOLLIN | EPOLLPRI;
+const int Channel::kReadEvent = EPOLLIN | EPOLLPRI | EPOLLET; // EPOLLET表示启动ET模式监听事件
 const int Channel::kWriteEvent = EPOLLOUT;
 
 Channel::Channel(EventLoop* loop, int fd)

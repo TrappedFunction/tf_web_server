@@ -4,6 +4,7 @@
 #include "http_request.h"
 #include "http_response.h"
 #include "mime_types.h"
+#include "net/timer.h"
 #include <iostream>
 #include <filesystem>
 #include <fstream>
@@ -68,6 +69,11 @@ void onMessage(const std::shared_ptr<Connection>& conn, Buffer* buf){
         return;
     }
     if(request.gotAll()){
+        // 活动发生，先取消旧的定时器
+        if(conn->getContext().has_value()){
+            TimerId timer_id = std::any_cast<TimerId>(conn->getContext());
+            conn->getLoop()->cancel(timer_id);
+        }
         HttpResponse response;
         response.addHeader("Server", "TF's Cpp Web Server");
         bool keep_alive = request.keepAlive();
@@ -83,16 +89,19 @@ void onMessage(const std::shared_ptr<Connection>& conn, Buffer* buf){
         // Keep-alive中，将不再直接关闭
         if(keep_alive){
             std::weak_ptr<Connection> weak_conn = conn;
-            conn->getLoop()->runAfter(kIdleConnectionTimeout, [weak_conn](){
-                std::shared_ptr<Connection> conn = weak_conn.lock();
-                if(conn){
+            TimerId new_timer_id = conn->getLoop()->runAfter(kIdleConnectionTimeout, [weak_conn](){
+                std::shared_ptr<Connection> conn_ptr = weak_conn.lock();
+                if(conn_ptr){
                     // 如果超时，服务器主动关闭连接
-                    conn->shutdown();
+                    std::cout << "Connection from [" << conn_ptr->getPeerAddrStr() << "] timed out, closing." << std::endl;
+                    conn_ptr->shutdown();
                 }
             });
+            conn->setContext(new_timer_id);
         }else{
             conn->shutdown();
         }
+        request.reset();
         
     }
 }

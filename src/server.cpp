@@ -1,4 +1,5 @@
 #include "server.h"
+#include "net/timer.h"
 #include <netinet/in.h> // 定义IP地址、协议、网络接口
 #include <iostream>
 #include <string>
@@ -85,10 +86,13 @@ void Server::onConnection(const ConnectionPtr& conn){
     std::cout << "New connection from [" << conn->getPeerAddrStr() << "]" << std::endl;
     // 为新连接设置初始的超时定时器
     std::weak_ptr<Connection> weak_conn = conn;
-    conn->getLoop()->runAfter(kIdleConnectionTimeout, [weak_conn](){
-        std::shared_ptr<Connection> conn = weak_conn.lock();
-        if(conn){
-            conn->shutdown();
+    TimerId timer_id = conn->getLoop()->runAfter(kIdleConnectionTimeout, [weak_conn](){
+        std::shared_ptr<Connection> conn_ptr = weak_conn.lock();
+        if(conn_ptr){
+            std::cout << "Connection from [" << conn_ptr->getPeerAddrStr() << "] timed out, closing." << std::endl;
+            conn_ptr->shutdown();
         }
     });
+    // 将TimerId存入Connection的上下文
+    conn->setContext(timer_id);
 }
