@@ -16,7 +16,7 @@ public:
     using ConnectionCallback = std::function<void(const std::shared_ptr<Connection>&)>;
     using MessageCallback = std::function<void(const std::shared_ptr<Connection>&, Buffer*)>;
 
-    explicit Server(EventLoop* loop, uint16_t port);
+    explicit Server(EventLoop* loop, uint16_t port, const int kIdleConnectionTimeout);
     ~Server();
 
     // 启动非阻塞服务器
@@ -46,5 +46,5 @@ private:
 
     // 管理所有连接，key是sockfd
     std::map<int, ConnectionPtr> connections_;
-    const int kIdleConnectionTimeout = 60; // 60秒空闲超时
+    const int kIdleConnectionTimeout; // 60秒空闲超时
 };

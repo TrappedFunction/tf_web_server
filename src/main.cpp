@@ -130,7 +130,7 @@ int main(int argc, char* argv[]){
     try{
         EventLoop loop;
         uint16_t port = std::stoi(argv[1]);
-        Server my_server(&loop, port);
+        Server my_server(&loop, port, kIdleConnectionTimeout);
 
         // my_server.setConnectionCallback(onConnection);
         my_server.setMessageCallback(onMessage);

@@ -5,9 +5,9 @@
 #include <string>
 #include <strings.h>
 
-Server::Server(EventLoop* loop, uint16_t port) : loop_(loop), port_(port),
+Server::Server(EventLoop* loop, uint16_t port, const int kIdleConnectionTimeout) : loop_(loop), port_(port),
     listen_socket_(new Socket(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0))),
-    accept_channel_(new Channel(loop, listen_socket_->getFd()))
+    accept_channel_(new Channel(loop, listen_socket_->getFd())), kIdleConnectionTimeout(kIdleConnectionTimeout)
 {
     // 创建Socket监听
     listen_socket_->bindAddress(port_);
