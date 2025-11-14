@@ -4,6 +4,7 @@
 #include <thread>
 #include <mutex>
 #include <functional>
+#include <map>
 #include "net/timer.h"
 #include "utils/timestamp.h"
 
@@ -11,10 +12,12 @@ class Channel;
 class Poller;
 class TimerQueue;
 class Timestamp;
+class Connection;
 
 class EventLoop{
 public:
     using Functor = std::function<void()>;
+    using ConnectionPtr = std::shared_ptr<Connection>;
 
     EventLoop();
     ~EventLoop();
@@ -48,6 +51,10 @@ public:
     // 取消定时器连接
     void cancel(TimerId timer_id);
 
+    void removeConnection(const ConnectionPtr& conn);
+    void removeConnectionInLoop(const ConnectionPtr& conn);
+    void addConnection(int fd, ConnectionPtr conn);
+
 private:
     void abortNotInLoopThread();
     void doPendingFunctors();
@@ -67,4 +74,6 @@ private:
     std::unique_ptr<TimerQueue> timer_queue_;
     int wakeup_fd_; // 用于唤醒的eventfd
     std::unique_ptr<Channel> wakeup_channel_;
+    // 管理所有连接，key是sockfd
+    std::map<int, ConnectionPtr> connections_;
 };

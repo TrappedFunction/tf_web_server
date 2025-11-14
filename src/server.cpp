@@ -51,12 +51,9 @@ void Server::handleConnection(){
                 // 设置回调函数
                 conn->setConnectionCallback(connection_callback_);
                 conn->setMessageCallback(message_callback_);
-                conn->setCloseCallback(std::bind(&Server::removeConnection, this, std::placeholders::_1));
-                // 将新的连接加入map管理
-                // 在主loop中执行，以保证线程安全
-                loop_->runInLoop([this, conn, connfd](){
-                    connections_[connfd] = conn;
-                });
+                conn->setCloseCallback(std::bind(&EventLoop::removeConnection, io_loop, std::placeholders::_1));
+                // 在io_loop自己的线程中将新的连接加入自己的map管理
+                io_loop->addConnection(connfd, conn);
                 // 触发连接建立回调
                 conn->connectionEstablished();
             });
@@ -72,25 +69,7 @@ void Server::handleConnection(){
     }
 }
 
-void Server::removeConnection(const ConnectionPtr& conn){
-    // 在主loop中执行移除操作
-    loop_->runInLoop(std::bind(&Server::removeConnectionInLoop, this, conn));
-}
 
-void Server::removeConnectionInLoop(const ConnectionPtr& conn){
-    loop_->assertInLoopThread();
-    int fd = conn->getFd();
-    size_t n = connections_.erase(fd);
-    assert(n == 1);
-
-    // 此时从Channel触发的事件已经处理完毕，可以安全移除Channel
-    EventLoop* io_loop = conn->getLoop();
-    io_loop->queueInLoop([conn](){
-        // 捕获了conn，延长其生命周期，lambda执行完毕后，conn被析构，从而Connection对象被销毁
-        // 在此之前需移除Channel
-        conn->getChannel()->remove();
-    });
-}
 
 // 当新连接建立或断开时调用
 void Server::onConnection(const ConnectionPtr& conn){

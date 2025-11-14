@@ -44,8 +44,7 @@ private:
     ConnectionCallback connection_callback_;
     MessageCallback message_callback_;
 
-    // 管理所有连接，key是sockfd
-    std::map<int, ConnectionPtr> connections_;
+    
     const int kIdleConnectionTimeout; // 60秒空闲超时
 
     // 线程池成员

@@ -1,6 +1,7 @@
 #include "net/event_loop.h"
 #include "net/channel.h"
 #include "net/poller.h"
+#include "connection.h"
 #include "net/timer.h"
 #include <cassert>
 #include <iostream>
@@ -147,4 +148,28 @@ TimerId EventLoop::runAfter(double delay, std::function<void()> cb){
 
 void EventLoop::cancel(TimerId timer_id){
     timer_queue_->cancel(timer_id);
+}
+
+void EventLoop::removeConnection(const ConnectionPtr& conn){
+    // 在主loop中执行移除操作
+    runInLoop(std::bind(&EventLoop::removeConnectionInLoop, this, conn));
+}
+
+void EventLoop::removeConnectionInLoop(const ConnectionPtr& conn){
+    assertInLoopThread();
+    int fd = conn->getFd();
+    size_t n = connections_.erase(fd);
+    assert(n == 1);
+
+    // 此时从Channel触发的事件已经处理完毕，可以安全移除Channel
+    queueInLoop([conn](){
+        // 捕获了conn，延长其生命周期，lambda执行完毕后，conn被析构，从而Connection对象被销毁
+        // 在此之前需移除Channel
+        conn->getChannel()->remove();
+    });
+}
+
+void EventLoop::addConnection(int fd, ConnectionPtr conn){
+    assertInLoopThread();
+    connections_[fd] = conn;
 }
