@@ -1,13 +1,15 @@
 #include "server.h"
 #include "net/timer.h"
+#include "net/event_loop_thread_pool.h"
 #include <netinet/in.h> // 定义IP地址、协议、网络接口
 #include <iostream>
 #include <string>
 #include <strings.h>
 
-Server::Server(EventLoop* loop, uint16_t port, const int kIdleConnectionTimeout) : loop_(loop), port_(port),
+Server::Server(EventLoop* loop, uint16_t port, const int kIdleConnectionTimeout, int num_threads) : loop_(loop), port_(port),
     listen_socket_(new Socket(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0))),
-    accept_channel_(new Channel(loop, listen_socket_->getFd())), kIdleConnectionTimeout(kIdleConnectionTimeout)
+    accept_channel_(new Channel(loop, listen_socket_->getFd())), kIdleConnectionTimeout(kIdleConnectionTimeout),
+    thread_pool_(new EventLoopThreadPool(loop, "worker", num_threads))
 {
     // 创建Socket监听
     listen_socket_->bindAddress(port_);
@@ -19,6 +21,7 @@ Server::Server(EventLoop* loop, uint16_t port, const int kIdleConnectionTimeout)
 Server::~Server() = default; // Socket的销毁由unique_ptr处理
 
 void Server::start(){
+    thread_pool_->start(); // 启动线程池
     listen_socket_->listen();
     // accept_channel_注册到EventLoop中，开始监听新连接事件
     accept_channel_->enableReading();
@@ -38,17 +41,25 @@ void Server::handleConnection(){
         if(connfd >= 0){
             std::cout << "Accepted new connection from client, fd=" << connfd << std::endl;
 
-            // 创建一个新的Connection对象来管理这个连接
-            ConnectionPtr conn = std::make_shared<Connection>(loop_, connfd, peer_addr);
+            // 从线程池中获取一个I/O loop
+            EventLoop* io_loop = thread_pool_->getNextLoop();
+            // 在选中的I/O loop中创建和初始化Connection
+            io_loop->runInLoop([this, io_loop, connfd, peer_addr](){
+                // 创建一个新的Connection对象来管理这个连接
+                ConnectionPtr conn = std::make_shared<Connection>(io_loop, connfd, peer_addr);
 
-            // 设置回调函数
-            conn->setConnectionCallback(connection_callback_);
-            conn->setMessageCallback(message_callback_);
-            conn->setCloseCallback(std::bind(&Server::removeConnection, this, std::placeholders::_1));
-            // 将新的连接加入map管理
-            connections_[connfd] = conn;
-            // 触发连接建立回调
-            conn->connectionEstablished();
+                // 设置回调函数
+                conn->setConnectionCallback(connection_callback_);
+                conn->setMessageCallback(message_callback_);
+                conn->setCloseCallback(std::bind(&Server::removeConnection, this, std::placeholders::_1));
+                // 将新的连接加入map管理
+                // 在主loop中执行，以保证线程安全
+                loop_->runInLoop([this, conn, connfd](){
+                    connections_[connfd] = conn;
+                });
+                // 触发连接建立回调
+                conn->connectionEstablished();
+            });
         }else{
             // 在非阻塞模式下，阿accept返回-1且errno为EAGAIN表示所有新连接都已处理完毕
             if(errno == EAGAIN || errno == EWOULDBLOCK){
@@ -62,13 +73,10 @@ void Server::handleConnection(){
 }
 
 void Server::removeConnection(const ConnectionPtr& conn){
-    // TODO 跨线程调用时，需要将任务放入目标loop的队列中执行，暂不实现
-    
-    // 从Eentloop中移除Channel
-    // conn->getChannel()->disableAll();
-    // conn->getChannel()->remove();
+    // 在主loop中执行移除操作
     loop_->runInLoop(std::bind(&Server::removeConnectionInLoop, this, conn));
 }
+
 void Server::removeConnectionInLoop(const ConnectionPtr& conn){
     loop_->assertInLoopThread();
     int fd = conn->getFd();
@@ -77,7 +85,11 @@ void Server::removeConnectionInLoop(const ConnectionPtr& conn){
 
     // 此时从Channel触发的事件已经处理完毕，可以安全移除Channel
     EventLoop* io_loop = conn->getLoop();
-    io_loop->removeChannel(conn->getChannel());
+    io_loop->queueInLoop([conn](){
+        // 捕获了conn，延长其生命周期，lambda执行完毕后，conn被析构，从而Connection对象被销毁
+        // 在此之前需移除Channel
+        conn->getChannel()->remove();
+    });
 }
 
 // 当新连接建立或断开时调用

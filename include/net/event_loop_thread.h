@@ -1,18 +1,10 @@
 #pragma once
 #include "net/event_loop.h"
+#include "socket.h"
 #include <thread>
 #include <mutex>
 #include <condition_variable>
 #include <string>
-
-class NonCopyable{
-public:
-    NonCopyable() = default;
-    ~NonCopyable() = default;
-private:
-    NonCopyable(const NonCopyable&) = delete;
-    NonCopyable& operator=(const NonCopyable&) = delete;
-};
 
 class EventLoopThread : NonCopyable{
 public:

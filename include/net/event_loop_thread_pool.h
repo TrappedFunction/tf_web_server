@@ -5,8 +5,8 @@
 #include <memory>
 #include <string>
 
-// 负责创建、启动和分发从线程的EventLoop
 
+// 负责创建、启动和分发从线程的EventLoop
 class EventLoopThreadPool : NonCopyable{
 public:
     EventLoopThreadPool(EventLoop* base_loop, const std::string& name, int num_threads);

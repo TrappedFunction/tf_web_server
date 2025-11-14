@@ -7,7 +7,7 @@
 #include <functional>
 #include <map>
 
-
+class EventLoopThreadPool;
 
 class Server{
 public:
@@ -16,7 +16,7 @@ public:
     using ConnectionCallback = std::function<void(const std::shared_ptr<Connection>&)>;
     using MessageCallback = std::function<void(const std::shared_ptr<Connection>&, Buffer*)>;
 
-    explicit Server(EventLoop* loop, uint16_t port, const int kIdleConnectionTimeout);
+    explicit Server(EventLoop* loop, uint16_t port, const int kIdleConnectionTimeout, int num_threads = 0);
     ~Server();
 
     // 启动非阻塞服务器
@@ -47,4 +47,7 @@ private:
     // 管理所有连接，key是sockfd
     std::map<int, ConnectionPtr> connections_;
     const int kIdleConnectionTimeout; // 60秒空闲超时
+
+    // 线程池成员
+    std::unique_ptr<EventLoopThreadPool> thread_pool_;
 };

@@ -13,11 +13,12 @@ EventLoopThread::~EventLoopThread(){
     }
 }
 
+// 由主Reactor调用，属于主线程函数
 EventLoop* EventLoopThread::startLoop(){
     thread_ = std::thread(&EventLoopThread::threadFunc, this);
 
     EventLoop* loop = nullptr;
-    {
+    { // 花括号用于释放lock
         // 等待，直到新线程创建好EventLoop并将其指针赋值给loop_
         std::unique_lock<std::mutex> lock(mutex_);
         cond_.wait(lock, [this] { return loop_ != nullptr; }); // 请求资源，请求成功执行接下来的代码，即P操作
@@ -26,6 +27,7 @@ EventLoop* EventLoopThread::startLoop(){
     return loop;
 }
 
+// 由从Reactor执行，属于从线程函数
 void EventLoopThread::threadFunc(){
     EventLoop loop; // 在栈上创建一个EventLoop，其生命周期与线程相同
 

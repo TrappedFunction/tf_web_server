@@ -39,6 +39,7 @@ public:
     bool isInLoopThread() const { return thread_id_ == std::this_thread::get_id(); }
     void runInLoop(Functor cb);
     void queueInLoop(Functor cb);
+    void wakeup();
 
     // 在指定时间运行回调
     TimerId runAt(Timestamp time, std::function<void()> cb);
@@ -50,6 +51,7 @@ public:
 private:
     void abortNotInLoopThread();
     void doPendingFunctors();
+    void handleRead(); // 用于wakeupFd_的读回调
     
 
     using ChannelList = std::vector<Channel*>;
@@ -61,6 +63,8 @@ private:
     std::unique_ptr<Poller> poller_;
     ChannelList active_channels_;
     std::vector<Functor> pending_functors_;
-    std::mutex mutex_;
+    std::mutex mutex_; // 用于保护pending_functors_
     std::unique_ptr<TimerQueue> timer_queue_;
+    int wakeup_fd_; // 用于唤醒的eventfd
+    std::unique_ptr<Channel> wakeup_channel_;
 };

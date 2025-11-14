@@ -4,6 +4,8 @@
 #include "net/timer.h"
 #include <cassert>
 #include <iostream>
+#include <sys/eventfd.h>
+#include <unistd.h>
 
 // TLS(Thread Local Storage) 确保每个线程最多只有一个EventLoop实例
 __thread EventLoop* t_loop_in_this_thread = nullptr;
@@ -13,18 +15,24 @@ EventLoop::EventLoop()
       quit_(false),
       thread_id_(std::this_thread::get_id()),
       poller_(new Poller(this)),
-      timer_queue_(new TimerQueue(this)){
+      timer_queue_(new TimerQueue(this)),
+      wakeup_fd_(::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC)), // 创建eventfd
+      wakeup_channel_(new Channel(this, wakeup_fd_)){
         if(t_loop_in_this_thread){
             // Log FATAL: Another EventLoop exists in this thread
             exit(1);
         }else{
             t_loop_in_this_thread = this;
         }
+        // 设置wakeup_channel_的回调
+        wakeup_channel_->setReadCallback(std::bind(&EventLoop::handleRead, this));
+        wakeup_channel_->enableReading(); // 始终监听wakeup_fd_上的事件
 }
 
 EventLoop::~EventLoop(){
     assert(!looping_);
     t_loop_in_this_thread = nullptr;
+    ::close(wakeup_fd_);
 }
 
 void EventLoop::loop(){
@@ -47,12 +55,21 @@ void EventLoop::loop(){
         for(Channel* channel : active_channels_){
             channel->handleEvent();
         }
-        // doPendingFunctors(); // 处理挂起的任务
+        doPendingFunctors(); // 处理完I/O事件后，处理挂起的任务
         // 处理到期的定时器
         timer_queue_->handleExpireTimers();
     }
 
     looping_ = false;
+}
+
+// eventfd的回调，只用于清空缓冲区，防止重复触发
+void EventLoop::handleRead(){
+    uint64_t one = 1;
+    size_t n = ::read(wakeup_fd_, &one, sizeof(one));
+    if(n != sizeof(one)){
+        // Log ERROR
+    }
 }
 
 void EventLoop::quit(){
@@ -70,21 +87,35 @@ void EventLoop::removeChannel(Channel* channel){
     assert(channel->ownerLoop() == this);
     assertInLoopThread();
     poller_->removeChannel(channel);
-    // runInLoop(std::bind(&Poller::removeChannel, poller_.get(), channel));
 }
 
 void EventLoop::runInLoop(Functor cb){
     if(isInLoopThread()){
-        cb();
-    }else{
-        // TODO跨线程调用，需要唤醒
+        cb(); // 如果是当前进程，直接执行
+    }else{ // 否则，放入队列并唤醒
+        // 跨线程调用，需要唤醒
+        queueInLoop(std::move(cb)); 
     }
 }
 
 void EventLoop::queueInLoop(Functor cb){
-    std::lock_guard<std::mutex> lock(mutex_);
-    pending_functors_.push_back(std::move(cb));
-    // TODO
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        pending_functors_.push_back(std::move(cb));
+    }
+    
+    // 只有在需要唤醒时才唤醒，如loop正在处理pending functors，此时加入新的functor就不需要唤醒
+    // TODO 简化处理，总是唤醒
+    wakeup();
+}
+
+void EventLoop::wakeup(){
+    uint64_t one = 1;
+    // 计数器从0变为1,触发可读事件
+    ssize_t n = ::write(wakeup_fd_, &one, sizeof(one));
+    if(n != sizeof(one)){
+        // Log ERROR
+    }
 }
 
 void EventLoop::doPendingFunctors(){
