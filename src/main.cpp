@@ -5,12 +5,22 @@
 #include "http_response.h"
 #include "mime_types.h"
 #include "net/timer.h"
+#include "utils/config.h"
+#include "utils/async_logging.h"
+#include "utils/logger.h"
 #include <iostream>
 #include <filesystem>
 #include <fstream>
 
 std::string base_path;
 const int kIdleConnectionTimeout = 60; // 60秒空闲超时
+std::unique_ptr<AsyncLogging> g_async_log;
+
+void asyncOutput(const char* msg, int len) {
+    if (g_async_log) {
+        g_async_log->append(msg, len);
+    }
+}
 
 // 处理http请求
 void onHttpRequest(const HttpRequest& req, HttpResponse* resp){
@@ -107,9 +117,35 @@ void onMessage(const std::shared_ptr<Connection>& conn, Buffer* buf){
 }
 
 int main(int argc, char* argv[]){
-    if(argc != 2){
-        std::cerr << "Usage: " << argv[0] << " <port>" << std::endl;
+    // 1. 加载配置文件
+    Config config;
+    std::string config_file = "../server.ini";
+    if (argc > 1) { // 允许通过命令行参数指定配置文件
+        config_file = argv[1];
+    }
+    if (!config.load(config_file)) {
+        fprintf(stderr, "ERROR: Failed to load config file: %s\n", config_file.c_str());
         return 1;
+    }
+
+    // 初始化日志系统
+    {
+        std::string log_basename = config.getString("logging", "basename", "server_log");
+        off_t roll_size = config.getInt("logging", "roll_size_mb", 500) * 1024 * 1024;
+        int flush_interval = config.getInt("logging", "flush_interval_sec", 3);
+        
+        g_async_log = std::make_unique<AsyncLogging>(log_basename, roll_size, flush_interval);
+        Logger::setOutput(asyncOutput);
+        
+        std::string log_level_str = config.getString("logging", "log_level", "INFO");
+        if (log_level_str == "TRACE") Logger::setLogLevel(Logger::TRACE);
+        else if (log_level_str == "DEBUG") Logger::setLogLevel(Logger::DEBUG);
+        else if (log_level_str == "WARN") Logger::setLogLevel(Logger::WARN);
+        else if (log_level_str == "ERROR") Logger::setLogLevel(Logger::ERROR);
+        else if (log_level_str == "FATAL") Logger::setLogLevel(Logger::FATAL);
+        else Logger::setLogLevel(Logger::INFO);
+        
+        g_async_log->start();
     }
 
     try{
@@ -129,16 +165,21 @@ int main(int argc, char* argv[]){
 
     try{
         EventLoop loop;
-        uint16_t port = std::stoi(argv[1]);
-        int num_threads = 4;
+        uint16_t port = config.getInt("server", "port", 12345);
+        int num_threads = config.getInt("server", "threads", 0);
         Server my_server(&loop, port, kIdleConnectionTimeout, num_threads);
 
         // my_server.setConnectionCallback(onConnection);
         my_server.setMessageCallback(onMessage);
-        
+        LOG_INFO << "Server starting...";
+        LOG_INFO << "Port: " << port;
+        LOG_INFO << "Worker Threads: " << num_threads;
+        LOG_INFO << "Web Root: " << base_path;
         my_server.start();
         // 启动事件循环
         loop.loop();
+        
+        g_async_log.release(); // 释放所有权
     }catch(const std::exception& e){
         // 异常处理代码
         std::cerr << "Exception caught in main: " << e.what() << std::endl;
