@@ -9,7 +9,6 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/server",
-            "args": ["8080"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],

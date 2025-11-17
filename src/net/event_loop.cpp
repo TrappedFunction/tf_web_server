@@ -30,10 +30,15 @@ EventLoop::EventLoop()
         wakeup_channel_->enableReading(); // 始终监听wakeup_fd_上的事件
 }
 
-EventLoop::~EventLoop(){
+EventLoop::~EventLoop() {
     assert(!looping_);
-    t_loop_in_this_thread = nullptr;
+    
+    // 在析构前，移除 wakeup_channel_
+    wakeup_channel_->disableAll();
+    wakeup_channel_->remove();
+
     ::close(wakeup_fd_);
+    t_loop_in_this_thread = nullptr;
 }
 
 void EventLoop::loop(){

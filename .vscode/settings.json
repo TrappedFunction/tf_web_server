@@ -69,6 +69,7 @@
         "stop_token": "cpp",
         "thread": "cpp",
         "any": "cpp",
-        "set": "cpp"
+        "set": "cpp",
+        "cinttypes": "cpp"
     }
 }

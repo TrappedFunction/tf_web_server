@@ -1,10 +1,12 @@
 #include "server.h"
 #include "net/timer.h"
 #include "net/event_loop_thread_pool.h"
+#include "net/ssl_context.h"
 #include <netinet/in.h> // 定义IP地址、协议、网络接口
 #include <iostream>
 #include <string>
 #include <strings.h>
+#include <openssl/err.h>
 
 Server::Server(EventLoop* loop, uint16_t port, const int kIdleConnectionTimeout, int num_threads) : loop_(loop), port_(port),
     listen_socket_(new Socket(::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0))),
@@ -18,7 +20,14 @@ Server::Server(EventLoop* loop, uint16_t port, const int kIdleConnectionTimeout,
     
 }
 
-Server::~Server() = default; // Socket的销毁由unique_ptr处理
+Server::~Server() {
+    loop_->assertInLoopThread();
+    std::cout << "Server destructing, stop listening on port " << port_ << std::endl;
+    
+    // **在析构前，必须将 accept_channel_ 从 EventLoop 中移除**
+    accept_channel_->disableAll(); // 停止监听所有事件
+    accept_channel_->remove();     // 从 Poller 中移除
+}
 
 void Server::start(){
     thread_pool_->start(); // 启动线程池
@@ -35,7 +44,7 @@ void Server::handleConnection(){
     while(true){
         // 可能一次到达 多个连接，所以声明和初始化需在循环中进行
         struct sockaddr_in peer_addr;
-        // bzero(&peer_addr, sizeof(peer_addr));
+        bzero(&peer_addr, sizeof(peer_addr));
         socklen_t addr_len = sizeof(peer_addr);
         int connfd = listen_socket_->accept(&peer_addr, &addr_len);
         if(connfd >= 0){
@@ -43,10 +52,29 @@ void Server::handleConnection(){
 
             // 从线程池中获取一个I/O loop
             EventLoop* io_loop = thread_pool_->getNextLoop();
+
+            // 创建SSL对象
+            SSL* ssl = nullptr;
+            if(ssl_context_){
+                ssl = SSL_new(ssl_context_->get());
+                if(!ssl){
+                    std::cerr << "SSL_new failed" << std::endl;
+                    ::close(connfd);
+                    continue;
+                }
+                // 将fd与SSL对象关联
+                if(SSL_set_fd(ssl, connfd) == 0){
+                    ERR_print_errors_fp(stderr);
+                    SSL_free(ssl);
+                    ::close(connfd);
+                    continue;
+                }
+                SSL_set_accept_state(ssl);
+            }
             // 在选中的I/O loop中创建和初始化Connection
-            io_loop->runInLoop([this, io_loop, connfd, peer_addr](){
+            io_loop->runInLoop([this, io_loop, connfd, peer_addr, ssl](){
                 // 创建一个新的Connection对象来管理这个连接
-                ConnectionPtr conn = std::make_shared<Connection>(io_loop, connfd, peer_addr);
+                ConnectionPtr conn = std::make_shared<Connection>(io_loop, connfd, peer_addr, ssl);
 
                 // 设置回调函数
                 conn->setConnectionCallback(connection_callback_);
@@ -86,4 +114,8 @@ void Server::onConnection(const ConnectionPtr& conn){
     });
     // 将TimerId存入Connection的上下文
     conn->setContext(timer_id);
+}
+
+void Server::enableSsl(const std::string& cert_path, const std::string& key_path){
+    ssl_context_ = std::make_unique<SslContext>(cert_path, key_path);
 }

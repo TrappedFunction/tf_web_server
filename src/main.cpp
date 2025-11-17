@@ -11,8 +11,9 @@
 #include <iostream>
 #include <filesystem>
 #include <fstream>
+#include <list>
 
-std::string base_path;
+std::string base_path, project_root_path;
 const int kIdleConnectionTimeout = 60; // 60秒空闲超时
 std::unique_ptr<AsyncLogging> g_async_log;
 
@@ -68,58 +69,76 @@ void onHttpRequest(const HttpRequest& req, HttpResponse* resp){
 
 // 设置给Server的MessageCallBack
 void onMessage(const std::shared_ptr<Connection>& conn, Buffer* buf){
-    HttpRequest request;
-    // 缓冲区的数据可能不足以解析一个完整的请求
-    if(!request.parse(buf)){
-        // 如果不足，等待下一次数据到来，出错发出400响应
-        if(!request.getMethod() == HttpRequest::INVALID){
-            conn->send("HTTP/1.1 400 Bad Request\r\n\r\n");
-            // conn->shutdown(); // 关闭连接
-        }
-        return;
-    }
-    if(request.gotAll()){
-        // 活动发生，先取消旧的定时器
-        if(conn->getContext().has_value()){
-            TimerId timer_id = std::any_cast<TimerId>(conn->getContext());
-            conn->getLoop()->cancel(timer_id);
-        }
-        HttpResponse response;
-        response.addHeader("Server", "TF's Cpp Web Server");
-        bool keep_alive = request.keepAlive();
-        response.setKeepAlive(keep_alive);
+    HttpRequest& request = conn->getRequest();
+    bool parse_ok = true;
+    while(buf->readableBytes() > 0){
+        parse_ok = request.parse(buf);
+        if(request.gotAll()){
+            // 活动发生，先取消旧的定时器
+            if(conn->getContext().has_value()){
+                TimerId timer_id = std::any_cast<TimerId>(conn->getContext());
+                conn->getLoop()->cancel(timer_id);
+            }
+            HttpResponse response;
+            response.addHeader("Server", "TF's Cpp Web Server");
+            bool keep_alive = request.keepAlive();
+            response.setKeepAlive(keep_alive);
 
-        onHttpRequest(request, &response);
+            onHttpRequest(request, &response);
 
-        Buffer response_buf;
-        response.appendToBuffer(&response_buf);
-        conn->send(&response_buf);
+            Buffer response_buf;
+            response.appendToBuffer(&response_buf);
+            conn->send(&response_buf);
 
-        // HTTP/1.0短连接
-        // Keep-alive中，将不再直接关闭
-        if(keep_alive){
-            std::weak_ptr<Connection> weak_conn = conn;
-            TimerId new_timer_id = conn->getLoop()->runAfter(kIdleConnectionTimeout, [weak_conn](){
-                std::shared_ptr<Connection> conn_ptr = weak_conn.lock();
-                if(conn_ptr){
-                    // 如果超时，服务器主动关闭连接
-                    std::cout << "Connection from [" << conn_ptr->getPeerAddrStr() << "] timed out, closing." << std::endl;
-                    conn_ptr->shutdown();
-                }
-            });
-            conn->setContext(new_timer_id);
-        }else{
-            conn->shutdown();
-        }
-        request.reset();
+            // Keep-alive中，将不再直接关闭
+            if(keep_alive){
+                std::weak_ptr<Connection> weak_conn = conn;
+                TimerId new_timer_id = conn->getLoop()->runAfter(kIdleConnectionTimeout, [weak_conn](){
+                    std::shared_ptr<Connection> conn_ptr = weak_conn.lock();
+                    if(conn_ptr){
+                        // 如果超时，服务器主动关闭连接
+                        std::cout << "Connection from [" << conn_ptr->getPeerAddrStr() << "] timed out, closing." << std::endl;
+                        conn_ptr->shutdown();
+                    }
+                });
+                conn->setContext(new_timer_id);
+            }else{
+                conn->shutdown();
+            }
+            request.reset();
         
+        }else if (parse_ok) {
+            // 数据包不完整，跳出循环，等待更多数据
+            break;
+        } else {
+            // 解析出错
+            conn->send("HTTP/1.1 400 Bad Request\r\n\r\n");
+            conn->shutdown();
+            break; // 出错后必须退出
+        }
     }
 }
 
 int main(int argc, char* argv[]){
+    try{
+        std::filesystem::path exe_path = std::filesystem::canonical(argv[0]);
+        std::filesystem::path project_root = exe_path.parent_path().parent_path();
+        project_root_path = (project_root).string();
+        base_path = (project_root/"www").string();
+
+        if(!std::filesystem::exists(base_path) || !std::filesystem::is_directory(base_path)){
+            std::cerr << "Error: Web root directory '" << base_path << "' not found" << std::endl;
+            return 1;
+        }
+        std::cout << "Using web root: " << base_path << std::endl;
+    }catch(const std::filesystem::filesystem_error& e){
+        std::cerr << "Filesystem error: " << e.what() << std::endl;
+        return 1;
+    }
+
     // 1. 加载配置文件
     Config config;
-    std::string config_file = "../server.ini";
+    std::string config_file = project_root_path + "/server.ini";
     if (argc > 1) { // 允许通过命令行参数指定配置文件
         config_file = argv[1];
     }
@@ -149,33 +168,37 @@ int main(int argc, char* argv[]){
     }
 
     try{
-        std::filesystem::path exe_path = std::filesystem::canonical(argv[0]);
-        std::filesystem::path project_root = exe_path.parent_path().parent_path();
-        base_path = (project_root/"www").string();
-
-        if(!std::filesystem::exists(base_path) || !std::filesystem::is_directory(base_path)){
-            std::cerr << "Error: Web root directory '" << base_path << "' not found" << std::endl;
-            return 1;
-        }
-        std::cout << "Using web root: " << base_path << std::endl;
-    }catch(const std::filesystem::filesystem_error& e){
-        std::cerr << "Filesystem error: " << e.what() << std::endl;
-        return 1;
-    }
-
-    try{
         EventLoop loop;
-        uint16_t port = config.getInt("server", "port", 12345);
         int num_threads = config.getInt("server", "threads", 0);
-        Server my_server(&loop, port, kIdleConnectionTimeout, num_threads);
 
-        // my_server.setConnectionCallback(onConnection);
-        my_server.setMessageCallback(onMessage);
-        LOG_INFO << "Server starting...";
-        LOG_INFO << "Port: " << port;
+        // ----------------HTTP Server----------------------------------
+        uint16_t http_port = config.getInt("server", "http_port", 8080);
+        Server http_server(&loop, http_port, kIdleConnectionTimeout, num_threads);
+        http_server.setMessageCallback(onMessage); // HTTP请求的处理逻辑
+        http_server.start();
+        LOG_INFO << "HTTP_Server starting...";
+        LOG_INFO << "Port: " << http_port;
         LOG_INFO << "Worker Threads: " << num_threads;
         LOG_INFO << "Web Root: " << base_path;
-        my_server.start();
+
+        // --------------------- HTTPS Server ------------------------------------
+        std::unique_ptr<Server> https_server_ptr;
+        if (config.getBool("server", "enable_ssl", false)) {
+            uint16_t https_port = config.getInt("server", "https_port", 8443);
+            https_server_ptr = std::make_unique<Server>(&loop, https_port, kIdleConnectionTimeout, num_threads);
+            https_server_ptr->setMessageCallback(onMessage); // 同一个处理逻辑
+
+            std::string cert_path = project_root_path + "/" + config.getString("ssl", "cert_path");
+            std::string key_path = project_root_path + "/" + config.getString("ssl", "key_path");
+            https_server_ptr->enableSsl(cert_path, key_path);
+
+            https_server_ptr->start();
+
+            LOG_INFO << "HTTPS_Server starting...";
+            LOG_INFO << "Port: " << https_port;
+            LOG_INFO << "Worker Threads: " << num_threads;
+            LOG_INFO << "Web Root: " << base_path;
+        }
         // 启动事件循环
         loop.loop();
         

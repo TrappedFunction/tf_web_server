@@ -8,6 +8,7 @@
 #include <map>
 
 class EventLoopThreadPool;
+class SslContext;
 
 class Server{
 public:
@@ -21,6 +22,9 @@ public:
 
     // 启动非阻塞服务器
     void start();
+
+    // 启动SSL
+    void enableSsl(const std::string& cert_path, const std::string& key_path);
 
     // 设置回调
     void setConnectionCallback(const ConnectionCallback& cb) { connection_callback_ = cb; }
@@ -49,4 +53,7 @@ private:
 
     // 线程池成员
     std::unique_ptr<EventLoopThreadPool> thread_pool_;
+
+    // SSL上下文
+    std::unique_ptr<SslContext> ssl_context_;
 };
