@@ -8,11 +8,12 @@ class HttpResponse{
 public:
     enum HttpStatusCode{
         kUnknow,
-        k2000k = 200,
+        k200Ok = 200,
         k400BadRequest = 400,
         k403Forbidden = 403,
         k404NotFound = 404,
         k500InternalServerError = 500,
+        k302Found = 302,
     };
 
     explicit HttpResponse();

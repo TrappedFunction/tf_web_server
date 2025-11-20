@@ -1,10 +1,125 @@
 <!DOCTYPE html>
-<html>
-    <head>
-        <title>TF Web Server</title>
-    </head>
-    <body>
-        <h1>Hello from C++ Web Server!</h1>
-        <p>This is index.html.</p>
-    </body>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>算法题解库 - TF Server</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 顶部导航 -->
+    <div class="navbar">
+        <h1>📚 算法题解库</h1>
+        <div class="nav-links">
+            <a href="/add.html">➕ 添加题解</a>
+            <a href="/qa.html">💬 提问箱</a>
+        </div>
+    </div>
+
+    <!-- 搜索区域 -->
+    <div class="search-bar">
+        <input type="text" id="searchBox" placeholder="搜索题目名称或关键词..." onkeypress="handleEnter(event)">
+        <button onclick="loadProblems()">搜索</button>
+    </div>
+    
+    <!-- 题目列表 -->
+    <div id="loading" style="text-align:center; color:#999; display:none;">加载中...</div>
+    <div id="problemList">
+        <!-- 动态生成的内容将在这里 -->
+    </div>
+
+    <script>
+        // 处理回车键搜索
+        function handleEnter(e) {
+            if (e.key === 'Enter') loadProblems();
+        }
+
+        // 难度中文映射
+        const difficultyMap = {
+            'Easy': '简单',
+            'Medium': '中等',
+            'Hard': '困难'
+        };
+
+        // 删除函数
+        async function deleteProblem(id, event) {
+            event.preventDefault(); // 防止链接跳转
+            if (!confirm("确定要删除这道题吗？")) return;
+
+            try {
+                // 发送 POST 请求来删除，Body 中包含 ID
+                // 注意：这里我们需要构造 x-www-form-urlencoded 格式的数据
+                // 因为我们的后端 parsePost 只支持这种格式
+                const response = await fetch('/api/problems/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `id=${id}`
+                });
+
+                if (response.ok) {
+                    alert("删除成功");
+                    loadProblems(); // 重新加载列表
+                } else {
+                    alert("删除失败");
+                }
+            } catch (err) {
+                console.error(err);
+                alert("请求出错");
+            }
+        }
+
+        async function loadProblems() {
+            const keyword = document.getElementById('searchBox').value;
+            const listDiv = document.getElementById('problemList');
+            const loadingDiv = document.getElementById('loading');
+
+            listDiv.innerHTML = '';
+            loadingDiv.style.display = 'block';
+
+            try {
+                const response = await fetch(`/api/problems?search=${encodeURIComponent(keyword)}`);
+                const problems = await response.json();
+                
+                loadingDiv.style.display = 'none';
+
+                if (problems.length === 0) {
+                    listDiv.innerHTML = '<div style="grid-column: 1/-1; text-align:center; color:#666; padding:40px;">没有找到相关题目</div>';
+                    return;
+                }
+
+                problems.forEach(p => {
+                const diffClass = `difficulty-${p.difficulty}`;
+                const diffText = difficultyMap[p.difficulty] || p.difficulty;
+                const tagsHtml = p.tags.map(t => `<span>${t}</span>`).join('');
+
+                const div = document.createElement('div'); // 改为 div，不再包整个 a 标签
+                div.className = `problem-card ${diffClass}`;
+                
+                // 内部结构：标题链接 + 删除按钮
+                div.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:start;">
+                        <h3 style="margin:0;"><a href="/problem.html?id=${p.id}" style="color:#2c3e50; text-decoration:none;">${p.title}</a></h3>
+                        <button onclick="deleteProblem(${p.id}, event)" style="background:none; border:none; color:#aaa; cursor:pointer; font-size:1.2em;">🗑️</button>
+                    </div>
+                    <div class="meta" style="margin-top:10px;">
+                        <strong class="${diffClass}">● ${diffText}</strong>
+                    </div>
+                    <div class="tags">
+                        ${tagsHtml}
+                    </div>
+                `;
+                listDiv.appendChild(div);
+            });
+            } catch (err) {
+                console.error(err);
+                loadingDiv.innerText = '加载失败，请检查网络连接';
+            }
+        }
+
+        // 页面加载时自动执行
+        loadProblems(); 
+    </script>
+</body>
 </html>

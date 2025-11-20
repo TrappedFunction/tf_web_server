@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<body>
+    <h1>Q&A Box</h1>
+    <div id="qaList"></div>
+    
+    <h3>Ask a Question</h3>
+    <form action="/api/questions" method="POST">
+        <textarea name="content" rows="3" cols="50" placeholder="Type your question..."></textarea><br>
+        <input type="submit" value="Ask">
+    </form>
+
+    <script>
+        async function loadQA() {
+            const res = await fetch('/api/questions');
+            const qs = await res.json();
+            const div = document.getElementById('qaList');
+            qs.forEach(q => {
+                div.innerHTML += `<p><strong>[${q.status}]</strong> ${q.content}</p><hr>`;
+            });
+        }
+        loadQA();
+    </script>
+</body>
+</html>

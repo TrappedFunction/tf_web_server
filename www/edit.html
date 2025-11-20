@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>编辑题目</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="navbar">
+        <a href="javascript:history.back()">⬅ 返回</a>
+        <h1>编辑题目</h1>
+    </div>
+    
+    <div id="loading" style="text-align:center;">加载中...</div>
+
+    <div class="detail-section" id="formSection" style="display:none;">
+        <form action="/api/problems/update" method="POST">
+            <!-- 关键：隐藏的 ID 字段 -->
+            <input type="hidden" id="problemId" name="id">
+
+            <p><label>题目名称:</label> <input type="text" id="title" name="title" required style="width:100%"></p>
+            <p>
+                <label>难度:</label> 
+                <select id="difficulty" name="difficulty">
+                    <option value="Easy">简单</option>
+                    <option value="Medium">中等</option>
+                    <option value="Hard">困难</option>
+                </select>
+            </p>
+            <p><label>算法类型:</label> <input type="text" id="algo" name="algorithm" style="width:100%"></p>
+            
+            <p><label>题目描述:</label><br> <textarea id="desc" name="description" rows="5" style="width:100%"></textarea></p>
+            
+            <p><label>解题思路:</label><br> <textarea id="idea" name="solution_idea" rows="3" style="width:100%"></textarea></p>
+            
+            <div style="display:flex; gap:20px;">
+                <p style="flex:1"><label>时间复杂度:</label> <input type="text" id="time" name="time_complexity" style="width:100%"></p>
+                <p style="flex:1"><label>空间复杂度:</label> <input type="text" id="space" name="space_complexity" style="width:100%"></p>
+            </div>
+
+            <p><label>代码实现:</label><br> <textarea id="code" name="code" rows="10" style="width:100%; font-family:monospace;"></textarea></p>
+            
+            <button type="submit" style="padding:10px 30px; background:#f39c12; color:white; border:none; cursor:pointer; border-radius:4px;">保存修改</button>
+        </form>
+    </div>
+
+    <script>
+        async function loadData() {
+            const params = new URLSearchParams(window.location.search);
+            const id = params.get('id');
+            
+            if (!id) {
+                alert("无效的题目ID");
+                window.location.href = "/";
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/problems/${id}`);
+                if (response.status !== 200) {
+                    alert("未找到该题目");
+                    return;
+                }
+                const p = await response.json();
+
+                // 填充表单
+                document.getElementById('problemId').value = p.id;
+                document.getElementById('title').value = p.title;
+                document.getElementById('difficulty').value = p.difficulty;
+                document.getElementById('algo').value = p.algorithm || "";
+                document.getElementById('desc').value = p.description || "";
+                document.getElementById('idea').value = p.solution_idea || "";
+                document.getElementById('time').value = p.time_complexity || "";
+                document.getElementById('space').value = p.space_complexity || "";
+                document.getElementById('code').value = p.code || "";
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('formSection').style.display = 'block';
+            } catch (err) {
+                console.error(err);
+                alert("加载数据失败");
+            }
+        }
+        loadData();
+    </script>
+</body>
+</html>

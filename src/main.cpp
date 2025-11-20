@@ -8,6 +8,8 @@
 #include "utils/config.h"
 #include "utils/async_logging.h"
 #include "utils/logger.h"
+#include "http/http_router.h"
+#include "http/handlers.h"
 #include <iostream>
 #include <filesystem>
 #include <fstream>
@@ -17,6 +19,9 @@ std::string base_path, project_root_path;
 const int kIdleConnectionTimeout = 60; // 60秒空闲超时
 std::unique_ptr<AsyncLogging> g_async_log;
 
+// 全局的或由 HttpServer 类持有的 Router 对象
+HttpRouter g_router;
+
 void asyncOutput(const char* msg, int len) {
     if (g_async_log) {
         g_async_log->append(msg, len);
@@ -24,47 +29,8 @@ void asyncOutput(const char* msg, int len) {
 }
 
 // 处理http请求
-void onHttpRequest(const HttpRequest& req, HttpResponse* resp){
-    std::string req_path = req.getPath();
-    if(req_path == "/"){
-        req_path = "/index.html";
-    }
-
-    auto safe_path_opt = HttpUtils::getSafeFilePath(base_path, req_path);
-
-    if(!safe_path_opt){
-        resp->setStatusCode(HttpResponse::k404NotFound);
-        resp->setStatusMessage("Not Found");
-        resp->setContentType("text/html; charset=utf-8");
-        resp->setBody("<html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>");
-        resp->setContentLength(resp->getBody().length());
-        return;
-    }
-
-    std::string file_path = *safe_path_opt;
-
-    std::ifstream file(file_path, std::ios::in | std::ios::binary);
-    if(file){
-        // 使用stringstream读取整个文件内容
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-        file.close();
-
-        resp->setStatusCode(HttpResponse::k2000k);
-        resp->setStatusMessage("OK");
-        // 使用MimeType类设置正确的Content-Type
-        std::filesystem::path fs_path(file_path);
-        resp->setContentType(MimeTypes::getMimeType(fs_path.extension().string()));
-        resp->setBody(buffer.str());
-        resp->setContentLength(resp->getBody().length());
-    }else{
-        // 文件存在但是存在读取错误
-        resp->setStatusCode(HttpResponse::k500InternalServerError);
-        resp->setStatusMessage("Internal Server Error");
-        resp->setContentType("text/html; charset=utf-8"); // 简化处理
-        resp->setBody("<html><body><h1>500 Internal Server Error</h1></body></html>");
-        resp->setContentLength(resp->getBody().length());
-    }
+void onHttpRequest(HttpRequest& req, HttpResponse* resp){
+    g_router.route(req, resp);
 }
 
 // 设置给Server的MessageCallBack
@@ -119,6 +85,15 @@ void onMessage(const std::shared_ptr<Connection>& conn, Buffer* buf){
     }
 }
 
+// 去除首尾空白
+std::string trim(const std::string& str) {
+    const std::string whitespace = " \t\n\r\f\v";
+    size_t first = str.find_first_not_of(whitespace);
+    if (first == std::string::npos) return "";
+    size_t last = str.find_last_not_of(whitespace);
+    return str.substr(first, (last - first + 1));
+}
+
 int main(int argc, char* argv[]){
     try{
         std::filesystem::path exe_path = std::filesystem::canonical(argv[0]);
@@ -168,6 +143,52 @@ int main(int argc, char* argv[]){
     }
 
     try{
+        // **从配置文件动态加载路由**
+        LOG_INFO << "Loading routes from config...";
+        const auto& routes_config = config.getSection("routes");
+        if (routes_config.empty()) {
+            LOG_WARN << "No [routes] section found in config file.";
+        } else {
+            const auto& handler_registry = Handlers::getHandlerRegistry();
+            for (const auto& pair : routes_config) {
+                // 解析 "METHOD, /path/pattern, handler_name"
+                std::string value = pair.second;
+                size_t comment_pos = value.find_first_of(";#");
+                if (comment_pos != std::string::npos) {
+                    value = value.substr(0, comment_pos);
+                }
+                std::stringstream ss(value);
+                std::string method_str, path, handler_name;
+                
+                std::getline(ss, method_str, ',');
+                std::getline(ss, path, ',');
+                std::getline(ss, handler_name);
+
+                method_str = trim(method_str);
+                path = trim(path);
+                handler_name = trim(handler_name);
+
+                // 字符串转 Method 枚举
+                HttpRequest::Method method = HttpRequest::INVALID;
+                if (method_str == "GET") method = HttpRequest::GET;
+                else if (method_str == "POST") method = HttpRequest::POST;
+                // ...
+
+                // 查找 Handler
+                auto handler_it = handler_registry.find(handler_name);
+                
+                if (method != HttpRequest::INVALID && handler_it != handler_registry.end()) {
+                    if (g_router.addRoute(method, path, handler_it->second)) {
+                        LOG_INFO << "Added route: " << method_str << " " << path << " -> " << handler_name;
+                    }
+                } else {
+                    LOG_ERROR << "Failed to add route: " << pair.second;
+                }
+            }
+        }
+
+
+
         EventLoop loop;
         int num_threads = config.getInt("server", "threads", 0);
 
@@ -205,7 +226,7 @@ int main(int argc, char* argv[]){
         g_async_log.release(); // 释放所有权
     }catch(const std::exception& e){
         // 异常处理代码
-        std::cerr << "Exception caught in main: " << e.what() << std::endl;
+        LOG_FATAL << "Exception caught in main: " << e.what();
         return 1;
     }
     return 0;

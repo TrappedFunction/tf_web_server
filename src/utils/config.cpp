@@ -3,6 +3,18 @@
 #include <sstream>
 #include <algorithm> // for std::transform
 
+const std::map<std::string, std::string> Config::empty_map_ = {};
+
+const std::map<std::string, std::string>& Config::getSection(const std::string& section) const {
+    auto section_it = data_.find(section);
+    if (section_it != data_.end()) {
+        // 如果找到了节，返回该节对应的内部 map
+        return section_it->second;
+    }
+    // 如果没有找到，返回静态的空 map
+    return empty_map_;
+}
+
 bool Config::load(const std::string& filename) {
     std::ifstream file(filename);
     if (!file.is_open()) {

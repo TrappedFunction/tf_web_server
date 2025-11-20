@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>添加新题目</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="navbar">
+        <a href="/">⬅ 返回首页</a>
+        <h1>添加新题目</h1>
+    </div>
+    <div class="detail-section">
+        <!-- 注意 action 和 method -->
+        <form action="/api/problems" method="POST">
+            <p><label>题目名称:</label> <input type="text" name="title" required style="width:100%"></p>
+            <p>
+                <label>难度:</label> 
+                <select name="difficulty">
+                    <option value="Easy">简单</option>
+                    <option value="Medium">中等</option>
+                    <option value="Hard">困难</option>
+                </select>
+            </p>
+            <p><label>算法类型:</label> <input type="text" name="algorithm" placeholder="例如: 动态规划, 双指针" style="width:100%"></p>
+            
+            <p><label>题目描述:</label><br> <textarea name="description" rows="5" style="width:100%"></textarea></p>
+            
+            <p><label>解题思路:</label><br> <textarea name="solution_idea" rows="3" style="width:100%"></textarea></p>
+            
+            <div style="display:flex; gap:20px;">
+                <p style="flex:1"><label>时间复杂度:</label> <input type="text" name="time_complexity" style="width:100%"></p>
+                <p style="flex:1"><label>空间复杂度:</label> <input type="text" name="space_complexity" style="width:100%"></p>
+            </div>
+
+            <p><label>代码实现:</label><br> <textarea name="code" rows="10" style="width:100%; font-family:monospace;"></textarea></p>
+            
+            <button type="submit" style="padding:10px 30px; background:#3498db; color:white; border:none; cursor:pointer; border-radius:4px;">提交并保存</button>
+        </form>
+    </div>
+</body>
+</html>

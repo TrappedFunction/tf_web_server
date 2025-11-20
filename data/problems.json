@@ -1,0 +1,31 @@
+[
+    {
+        "algorithm": "Hash Map",
+        "code": "class Solution { ... }",
+        "description": "Given an array of integers, return indices of the two numbers such that they add up to a specific target.",
+        "difficulty": "Easy",
+        "id": 1,
+        "solution_idea": "Use a hash map to store the complement of each number as we iterate.",
+        "space_complexity": "O(n)",
+        "tags": [
+            "Array",
+            "Hash Table"
+        ],
+        "time_complexity": "O(n)",
+        "title": "Two Sum"
+    },
+    {
+        "algorithm": "Iteration",
+        "code": "class Solution { ... }",
+        "description": "Reverse a singly linked list.",
+        "difficulty": "Medium",
+        "id": 2,
+        "solution_idea": "Use three pointers: prev, curr, next.",
+        "space_complexity": "O(1)",
+        "tags": [
+            "Linked List"
+        ],
+        "time_complexity": "O(n)",
+        "title": "Reverse Linked List"
+    }
+]

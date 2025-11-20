@@ -1,4 +1,5 @@
 #include "socket.h"
+#include "utils/logger.h"
 #include <fcntl.h>
 #include <cstring>
 #include <cstdio>
@@ -6,7 +7,17 @@
 #include <sys/socket.h>
 
 Socket::Socket(int fd) : fd_(fd){
+    if (fd_ < 0) {
+        perror("socket creation failed");
+        exit(1);
+    }
 
+    // **新增：启用 SO_REUSEADDR**
+    int optval = 1;
+    if (::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
+        perror("setsockopt(SO_REUSEADDR) failed");
+        // 这是一个非致命错误，可以选择不退出，但最好打日志
+    }
 }
 Socket::~Socket(){
     if(fd_ > 0){
@@ -43,7 +54,7 @@ void Socket::bindAddress(uint16_t port){
 void Socket::listen(){
     // 开始监听
     if(::listen(fd_, SOMAXCONN) < 0){
-        perror("listen() error");
+        LOG_ERROR <<"listen() error";
         exit(EXIT_FAILURE);
     }
 }

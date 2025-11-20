@@ -32,6 +32,11 @@ public:
     // "true", "yes", "on", "1" (不区分大小写) 会被解析为 true
     // 其他值都被解析为 false
     bool getBool(const std::string& section, const std::string& key, bool default_value = false) const;
+
+    // 获取整个节的所有键值对
+    // @param section: 节的名称
+    // @return: 一个包含该节所有 key-value 的 map。如果节不存在，返回一个空的 map。
+    const std::map<std::string, std::string>& getSection(const std::string& section) const;
     
     // 检查某个节或键是否存在
     bool hasSection(const std::string& section) const;
@@ -43,4 +48,6 @@ private:
 
     // 使用嵌套 map 来存储 INI 数据: map<section, map<key, value>>
     std::map<std::string, std::map<std::string, std::string>> data_;
+
+    static const std::map<std::string, std::string> empty_map_;
 };

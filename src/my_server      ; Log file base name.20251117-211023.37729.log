@@ -1,8 +1,0 @@
-2025/11/17 21:10:23.999483 140737352959808 INFO    HTTP_Server starting... - /home/ubuntu2204/tf_web_server/src/main.cpp:179
-2025/11/17 21:10:23.999500 140737352959808 INFO    Port: 12345 - /home/ubuntu2204/tf_web_server/src/main.cpp:180
-2025/11/17 21:10:23.999502 140737352959808 INFO    Worker Threads: 4 - /home/ubuntu2204/tf_web_server/src/main.cpp:181
-2025/11/17 21:10:23.999503 140737352959808 INFO    Web Root: /home/ubuntu2204/tf_web_server/www - /home/ubuntu2204/tf_web_server/src/main.cpp:182
-2025/11/17 21:10:24.005909 140737352959808 INFO    HTTPS_Server starting... - /home/ubuntu2204/tf_web_server/src/main.cpp:197
-2025/11/17 21:10:24.006044 140737352959808 INFO    Port: 12346 - /home/ubuntu2204/tf_web_server/src/main.cpp:198
-2025/11/17 21:10:24.006048 140737352959808 INFO    Worker Threads: 4 - /home/ubuntu2204/tf_web_server/src/main.cpp:199
-2025/11/17 21:10:24.006049 140737352959808 INFO    Web Root: /home/ubuntu2204/tf_web_server/www - /home/ubuntu2204/tf_web_server/src/main.cpp:200
