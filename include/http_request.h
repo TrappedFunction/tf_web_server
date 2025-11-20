@@ -39,10 +39,10 @@ public:
 
     const RouteParams& getRouteParams() const { return route_params_; }
     void setRouteParams(const RouteParams& params) { route_params_ = params; }
-
-private:
     // URL 解码辅助函数
     static std::string urlDecode(const std::string& str);
+
+private:
 
     bool parseRequestLine(const char* begin, const char* end);
     bool parseHeader(const char* begin, const char* end);

@@ -1,5 +1,6 @@
 #include "http/handlers.h"
 #include "http_utils.h"
+#include "http_request.h"
 #include "utils/logger.h"
 #include "utils/json.hpp" // 引入 json 库
 #include <fstream>
@@ -48,41 +49,89 @@ void writeJsonFile(const std::string& filename, const json& data) {
     }
 }
 
+// 辅助函数：解析查询字符串为 map
+std::map<std::string, std::string> parseQueryString(const std::string& query) {
+    std::map<std::string, std::string> params;
+    std::string key, value;
+    size_t start = 0, end;
+    while (start < query.length()) {
+        end = query.find('=', start);
+        if (end == std::string::npos) break;
+        key = HttpRequest::urlDecode(query.substr(start, end - start));
+        start = end + 1;
+        end = query.find('&', start);
+        if (end == std::string::npos) end = query.length();
+        value = HttpRequest::urlDecode(query.substr(start, end - start));
+        params[key] = value;
+        start = end + 1;
+    }
+    return params;
+}
+
 // API: 获取所有题目列表 (支持搜索)
 // GET /api/problems?search=keyword
 void handleGetProblems(const HttpRequest& req, HttpResponse* resp) {
     json problems = readJsonFile("problems.json");
-    std::string keyword = req.getQuery(); // 假设 query 是 "search=xxx"，这里简化处理
     
-    // 简单的解析 query string (search=xxx)
-    size_t pos = keyword.find("search=");
-    std::string search_term = "";
-    if (pos != std::string::npos) {
-        search_term = keyword.substr(pos + 7);
-    }
+    // 1. 解析参数
+    auto queryParams = parseQueryString(req.getQuery());
+    std::string search_term = queryParams["search"];
+    int limit = queryParams.count("limit") ? std::stoi(queryParams["limit"]) : 20; // 默认每次加载20条
+    int offset = queryParams.count("offset") ? std::stoi(queryParams["offset"]) : 0;
 
-    json result = json::array();
+    // 2. 过滤 (搜索)
+    json filtered_problems = json::array();
+    
+    // 判断搜索词是否纯数字（用于ID搜索）
+    bool is_id_search = !search_term.empty() && 
+                        std::all_of(search_term.begin(), search_term.end(), ::isdigit);
+    int search_id = is_id_search ? std::stoi(search_term) : -1;
+
     for (const auto& p : problems) {
-        // 如果有搜索词，进行过滤
+        bool match = true;
         if (!search_term.empty()) {
-            std::string title = p.value("title", "");
-            // 简单的子串查找 (不区分大小写略复杂，这里做简单演示)
-            if (title.find(search_term) == std::string::npos) {
-                continue;
+            if (is_id_search) {
+                // 按 ID 精确匹配
+                if (p.value("id", 0) != search_id) match = false;
+            } else {
+                // 按标题模糊匹配
+                std::string title = p.value("title", "");
+                // 简单的大小写不敏感处理（可选）
+                if (title.find(search_term) == std::string::npos) match = false;
             }
         }
-        // 返回摘要信息
-        result.push_back({
-            {"id", p.value("id", 0)},
-            {"title", p.value("title", "无标题")},
-            {"difficulty", p.value("difficulty", "Easy")},
-            {"tags", p.value("tags", json::array())}
-        });
+
+        if (match) {
+            filtered_problems.push_back({
+                {"id", p.value("id", 0)},
+                {"title", p.value("title", "无标题")},
+                {"difficulty", p.value("difficulty", "Easy")},
+                {"algorithm", p.value("algorithm", "")}, // 列表页可能需要显示算法标签
+                {"tags", p.value("tags", json::array())}
+            });
+        }
     }
+
+    // 3. 分页 (Slice)
+    json paged_result = json::array();
+    int total_size = filtered_problems.size();
+    
+    if (offset < total_size) {
+        int end = std::min(offset + limit, total_size);
+        for (int i = offset; i < end; ++i) {
+            paged_result.push_back(filtered_problems[i]);
+        }
+    }
+
+    // 返回结果，包含总数以便前端判断是否还有更多
+    json response_data = {
+        {"total", total_size},
+        {"data", paged_result}
+    };
 
     resp->setStatusCode(HttpResponse::k200Ok);
     resp->setContentType("application/json; charset=utf-8");
-    resp->setBody(result.dump());
+    resp->setBody(response_data.dump());
     resp->setContentLength(resp->getBody().length());
 }
 

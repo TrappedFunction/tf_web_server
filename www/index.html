@@ -3,11 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>算法题解库 - TF Server</title>
+    <title>题库 - TF Algo</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- 顶部导航 -->
     <div class="navbar">
         <h1>📚 算法题解库</h1>
         <div class="nav-links">
@@ -16,110 +15,141 @@
         </div>
     </div>
 
-    <!-- 搜索区域 -->
     <div class="search-bar">
-        <input type="text" id="searchBox" placeholder="搜索题目名称或关键词..." onkeypress="handleEnter(event)">
-        <button onclick="loadProblems()">搜索</button>
+        <!-- 支持按 ID 或 标题搜索 -->
+        <input type="text" id="searchBox" placeholder="输入题目编号 或 标题关键词..." onkeypress="handleEnter(event)">
+        <button onclick="resetAndLoad()">搜索</button>
     </div>
     
-    <!-- 题目列表 -->
-    <div id="loading" style="text-align:center; color:#999; display:none;">加载中...</div>
-    <div id="problemList">
-        <!-- 动态生成的内容将在这里 -->
+    <div class="problem-list-container">
+        <!-- 表头 -->
+        <div class="list-header">
+            <div class="col-id">#</div>
+            <div class="col-title">题目名称</div>
+            <div class="col-algo">算法标签</div>
+            <div class="col-diff">难度</div>
+            <div class="col-action">操作</div>
+        </div>
+        
+        <!-- 列表内容区域 -->
+        <div id="problemList"></div>
+        
+        <!-- 底部加载提示哨兵 -->
+        <div id="loading-sentinel">正在加载更多...</div>
     </div>
 
     <script>
-        // 处理回车键搜索
-        function handleEnter(e) {
-            if (e.key === 'Enter') loadProblems();
+        const difficultyMap = { 'Easy': '简单', 'Medium': '中等', 'Hard': '困难' };
+        
+        // 分页状态
+        let currentOffset = 0;
+        const limit = 15;
+        let isLoading = false;
+        let hasMore = true;
+        let currentKeyword = "";
+
+        function handleEnter(e) { if (e.key === 'Enter') resetAndLoad(); }
+
+        // 重置搜索（点击搜索按钮或刷新时）
+        function resetAndLoad() {
+            currentKeyword = document.getElementById('searchBox').value.trim();
+            currentOffset = 0;
+            hasMore = true;
+            document.getElementById('problemList').innerHTML = ''; // 清空列表
+            loadMore();
         }
 
-        // 难度中文映射
-        const difficultyMap = {
-            'Easy': '简单',
-            'Medium': '中等',
-            'Hard': '困难'
-        };
-
-        // 删除函数
+        // 删除逻辑
         async function deleteProblem(id, event) {
-            event.preventDefault(); // 防止链接跳转
+            event.stopPropagation();
             if (!confirm("确定要删除这道题吗？")) return;
-
             try {
-                // 发送 POST 请求来删除，Body 中包含 ID
-                // 注意：这里我们需要构造 x-www-form-urlencoded 格式的数据
-                // 因为我们的后端 parsePost 只支持这种格式
                 const response = await fetch('/api/problems/delete', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                     body: `id=${id}`
                 });
-
                 if (response.ok) {
-                    alert("删除成功");
-                    loadProblems(); // 重新加载列表
+                    // 删除 DOM 元素而不是重新加载，体验更好
+                    const row = document.getElementById(`row-${id}`);
+                    if(row) row.remove();
                 } else {
                     alert("删除失败");
                 }
-            } catch (err) {
-                console.error(err);
-                alert("请求出错");
-            }
+            } catch (err) { alert("请求出错"); }
         }
 
-        async function loadProblems() {
-            const keyword = document.getElementById('searchBox').value;
-            const listDiv = document.getElementById('problemList');
-            const loadingDiv = document.getElementById('loading');
-
-            listDiv.innerHTML = '';
-            loadingDiv.style.display = 'block';
+        // 加载数据核心逻辑
+        async function loadMore() {
+            if (isLoading || !hasMore) return;
+            
+            isLoading = true;
+            const sentinel = document.getElementById('loading-sentinel');
+            sentinel.innerText = "正在加载更多...";
+            sentinel.style.display = 'block';
 
             try {
-                const response = await fetch(`/api/problems?search=${encodeURIComponent(keyword)}`);
-                const problems = await response.json();
+                const url = `/api/problems?search=${encodeURIComponent(currentKeyword)}&offset=${currentOffset}&limit=${limit}`;
+                const response = await fetch(url);
+                const resData = await response.json();
                 
-                loadingDiv.style.display = 'none';
+                const problems = resData.data;
+                const total = resData.total;
 
                 if (problems.length === 0) {
-                    listDiv.innerHTML = '<div style="grid-column: 1/-1; text-align:center; color:#666; padding:40px;">没有找到相关题目</div>';
+                    hasMore = false;
+                    sentinel.innerText = currentOffset === 0 ? "暂无数据" : "—— 到底了 ——";
+                    isLoading = false;
                     return;
                 }
 
-                problems.forEach(p => {
-                const diffClass = `difficulty-${p.difficulty}`;
-                const diffText = difficultyMap[p.difficulty] || p.difficulty;
-                const tagsHtml = p.tags.map(t => `<span>${t}</span>`).join('');
-
-                const div = document.createElement('div'); // 改为 div，不再包整个 a 标签
-                div.className = `problem-card ${diffClass}`;
+                const listDiv = document.getElementById('problemList');
                 
-                // 内部结构：标题链接 + 删除按钮
-                div.innerHTML = `
-                    <div style="display:flex; justify-content:space-between; align-items:start;">
-                        <h3 style="margin:0;"><a href="/problem.html?id=${p.id}" style="color:#2c3e50; text-decoration:none;">${p.title}</a></h3>
-                        <button onclick="deleteProblem(${p.id}, event)" style="background:none; border:none; color:#aaa; cursor:pointer; font-size:1.2em;">🗑️</button>
-                    </div>
-                    <div class="meta" style="margin-top:10px;">
-                        <strong class="${diffClass}">● ${diffText}</strong>
-                    </div>
-                    <div class="tags">
-                        ${tagsHtml}
-                    </div>
-                `;
-                listDiv.appendChild(div);
-            });
+                problems.forEach(p => {
+                    const diffClass = `diff-${p.difficulty}`;
+                    const diffText = difficultyMap[p.difficulty] || p.difficulty;
+                    const algoText = p.algorithm || (p.tags ? p.tags.join(', ') : '-');
+
+                    const row = document.createElement('div');
+                    row.className = 'list-row';
+                    row.id = `row-${p.id}`;
+                    row.innerHTML = `
+                        <div class="col-id">${p.id}</div>
+                        <div class="col-title"><a href="/problem.html?id=${p.id}">${p.title}</a></div>
+                        <div class="col-algo">${algoText}</div>
+                        <div class="col-diff ${diffClass}">${diffText}</div>
+                        <div class="col-action">
+                            <button onclick="deleteProblem(${p.id}, event)" style="border:none; background:none; cursor:pointer; color:#ccc;">🗑️</button>
+                        </div>
+                    `;
+                    listDiv.appendChild(row);
+                });
+
+                currentOffset += problems.length;
+                if (currentOffset >= total) {
+                    hasMore = false;
+                    sentinel.innerText = "—— 到底了 ——";
+                }
+
             } catch (err) {
                 console.error(err);
-                loadingDiv.innerText = '加载失败，请检查网络连接';
+                sentinel.innerText = "加载失败";
+            } finally {
+                isLoading = false;
             }
         }
 
-        // 页面加载时自动执行
-        loadProblems(); 
+        // 监听滚动事件实现无限加载
+        window.addEventListener('scroll', () => {
+            const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
+            // 当滚动条距离底部小于 100px 时，触发加载
+            if (scrollTop + clientHeight >= scrollHeight - 100) {
+                loadMore();
+            }
+        });
+
+        // 初始加载
+        resetAndLoad();
     </script>
 </body>
 </html>
