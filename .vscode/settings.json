@@ -73,6 +73,8 @@
         "cinttypes": "cpp",
         "bitset": "cpp",
         "regex": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "ranges": "cpp",
+        "valarray": "cpp"
     }
 }

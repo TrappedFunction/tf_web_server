@@ -1,0 +1,47 @@
+2025/11/21 12:51:30.046811 140737352959808 INFO    Loading routes from config... - /home/ubuntu2204/tf_web_server/src/main.cpp:147
+2025/11/21 12:51:30.046854 140737352959808 INFO    Adding regex route: /add.html - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.046856 140737352959808 INFO    Added route: GET /add.html -> static - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.046861 140737352959808 INFO    Adding regex route: /api/problems - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.046862 140737352959808 INFO    Added route: POST /api/problems -> api_add_problem - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.046865 140737352959808 INFO    Adding regex route: /api/questions - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.046866 140737352959808 INFO    Added route: POST /api/questions -> api_add_question - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.046869 140737352959808 INFO    Adding regex route: /api/problems/delete - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.046870 140737352959808 INFO    Added route: POST /api/problems/delete -> api_delete_problem - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.046872 140737352959808 INFO    Adding regex route: /api/favorites/add - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.046873 140737352959808 INFO    Added route: POST /api/favorites/add -> api_add_to_favorite - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.046876 140737352959808 INFO    Adding regex route: /api/favorites/create - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.046877 140737352959808 INFO    Added route: POST /api/favorites/create -> api_create_favorite - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.046879 140737352959808 INFO    Adding regex route: /api/favorites - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.046880 140737352959808 INFO    Added route: GET /api/favorites -> api_get_favorites - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.046996 140737352959808 INFO    Added route: GET /api/problems/([0-9]+) -> api_get_problem_detail - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.046999 140737352959808 INFO    Adding regex route: /api/problems - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.047000 140737352959808 INFO    Added route: GET /api/problems -> api_get_problems - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.047002 140737352959808 INFO    Adding regex route: /api/questions - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.047003 140737352959808 INFO    Added route: GET /api/questions -> api_get_questions - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.047006 140737352959808 INFO    Adding regex route: /api/tags - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.047007 140737352959808 INFO    Added route: GET /api/tags -> api_get_all_tags - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.047009 140737352959808 INFO    Adding regex route: /api/problems/update - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.047010 140737352959808 INFO    Added route: POST /api/problems/update -> api_update_problem - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.047018 140737352959808 INFO    Added route: GET .*\.css -> static - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.047021 140737352959808 INFO    Adding regex route: /problem.html - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.047022 140737352959808 INFO    Added route: GET /problem.html -> static - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.047024 140737352959808 INFO    Adding regex route: /edit.html - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.047025 140737352959808 INFO    Added route: GET /edit.html -> static - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.047028 140737352959808 INFO    Adding regex route: / - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.047029 140737352959808 INFO    Added route: GET / -> static - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.047031 140737352959808 INFO    Adding regex route: /index.html - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.047032 140737352959808 INFO    Added route: GET /index.html -> static - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.047039 140737352959808 INFO    Added route: GET .*\.js -> static - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.047115 140737352959808 INFO    Added route: GET /products/([a-zA-Z0-9_-]+) -> getProductByName - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.047118 140737352959808 INFO    Adding regex route: /qa.html - /home/ubuntu2204/tf_web_server/src/http/http_router.cpp:8
+2025/11/21 12:51:30.047119 140737352959808 INFO    Added route: GET /qa.html -> static - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.047127 140737352959808 INFO    Added route: GET /static/.* -> static - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.047220 140737352959808 INFO    Added route: GET /users/(\d+) -> getUserById - /home/ubuntu2204/tf_web_server/src/main.cpp:182
+2025/11/21 12:51:30.052915 140737352959808 INFO    HTTP_Server starting... - /home/ubuntu2204/tf_web_server/src/main.cpp:200
+2025/11/21 12:51:30.052928 140737352959808 INFO    Port: 12345 - /home/ubuntu2204/tf_web_server/src/main.cpp:201
+2025/11/21 12:51:30.052930 140737352959808 INFO    Worker Threads: 4 - /home/ubuntu2204/tf_web_server/src/main.cpp:202
+2025/11/21 12:51:30.052931 140737352959808 INFO    Web Root: /home/ubuntu2204/tf_web_server/www - /home/ubuntu2204/tf_web_server/src/main.cpp:203
+2025/11/21 12:51:30.059010 140737352959808 INFO    HTTPS_Server starting... - /home/ubuntu2204/tf_web_server/src/main.cpp:218
+2025/11/21 12:51:30.059024 140737352959808 INFO    Port: 12346 - /home/ubuntu2204/tf_web_server/src/main.cpp:219
+2025/11/21 12:51:30.059026 140737352959808 INFO    Worker Threads: 4 - /home/ubuntu2204/tf_web_server/src/main.cpp:220
+2025/11/21 12:51:30.059027 140737352959808 INFO    Web Root: /home/ubuntu2204/tf_web_server/www - /home/ubuntu2204/tf_web_server/src/main.cpp:221

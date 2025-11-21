@@ -8,45 +8,83 @@
 </head>
 <body>
     <div class="navbar">
-        <h1>📚 算法题解库</h1>
+        <h1> TF韩术-算法题解库</h1>
         <div class="nav-links">
             <a href="/add.html">➕ 添加题解</a>
             <a href="/qa.html">💬 提问箱</a>
         </div>
     </div>
 
-    <div class="search-bar">
-        <!-- 支持按 ID 或 标题搜索 -->
-        <input type="text" id="searchBox" placeholder="输入题目编号 或 标题关键词..." onkeypress="handleEnter(event)">
-        <button onclick="resetAndLoad()">搜索</button>
-    </div>
-    
-    <div class="problem-list-container">
-        <!-- 表头 -->
-        <div class="list-header">
-            <div class="col-id">#</div>
-            <div class="col-title">题目名称</div>
-            <div class="col-algo">算法标签</div>
-            <div class="col-diff">难度</div>
-            <div class="col-action">操作</div>
+    <div class="main-container">
+        <!-- 左侧边栏 -->
+        <div class="sidebar">
+            <h3>📁 收藏夹</h3>
+            <ul id="favListSidebar">
+                <li class="active" onclick="selectFav(-1, this)">全部题目</li>
+                <!-- 动态加载收藏夹 -->
+            </ul>
         </div>
-        
-        <!-- 列表内容区域 -->
-        <div id="problemList"></div>
-        
-        <!-- 底部加载提示哨兵 -->
-        <div id="loading-sentinel">正在加载更多...</div>
+
+        <!-- 右侧内容区 -->
+        <div class="content-area">
+            <div class="search-bar">
+                <input type="text" id="searchBox" placeholder="输入题目编号 或 标题关键词..." onkeypress="handleEnter(event)">
+                <button onclick="resetAndLoad()">搜索</button>
+            </div>
+
+            <div id="tagContainer" class="tag-filter-area"></div>
+
+            <div class="problem-list-container">
+                <!-- 表头 -->
+                <div class="list-header">
+                    <div class="col-id">#</div>
+                    <div class="col-title">题目名称</div>
+                    <div class="col-algo">算法标签</div>
+                    <div class="col-diff">难度</div>
+                    <div class="col-action">操作</div>
+                </div>
+                
+                <!-- 列表内容区域 -->
+                <div id="problemList"></div>
+                
+                <!-- 底部加载提示哨兵 -->
+                <div id="loading-sentinel">正在加载更多...</div>
+            </div>
+        </div>
     </div>
 
+    <div id="tagContainer" class="tag-filter-area">
+        <!-- 动态加载标签 -->
+    </div>
+
+    <!-- 统一的收藏管理模态框 -->
+    <div id="manageFavModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>管理收藏</h3>
+                <span class="close" onclick="closeManageModal()">&times;</span>
+            </div>
+            <div id="manageFavListContainer" class="fav-list-container">
+                <!-- 动态加载收藏夹列表 -->
+            </div>
+            <div style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px;">
+                <input type="text" id="newFavName" placeholder="新建收藏夹" style="width: 65%;">
+                <button onclick="createFavorite()">新建</button>
+            </div>
+        </div>
+    </div>
+    
     <script>
         const difficultyMap = { 'Easy': '简单', 'Medium': '中等', 'Hard': '困难' };
-        
+        let currentFavId = -1; // -1 表示全部
         // 分页状态
         let currentOffset = 0;
         const limit = 15;
         let isLoading = false;
         let hasMore = true;
         let currentKeyword = "";
+        let currentTag = ""; // 当前选中的标签
+        let currentProblemIdToFav = 0; // 当前要收藏的题目ID
 
         function handleEnter(e) { if (e.key === 'Enter') resetAndLoad(); }
 
@@ -58,6 +96,70 @@
             document.getElementById('problemList').innerHTML = ''; // 清空列表
             loadMore();
         }
+
+        // ---------------- 初始化加载 ----------------
+        async function init() {
+            await loadTags();
+            await loadSidebar();
+            resetAndLoad();
+        }
+
+        // 初始化侧边栏
+        async function loadSidebar() {
+            // 记录当前选中的 ID，以便重绘后恢复高亮
+            // 注意：currentFavId 是全局变量，这步其实是多余的，但逻辑上更清晰
+            const activeId = currentFavId; 
+            const res = await fetch('/api/favorites');
+            const favs = await res.json();
+            const ul = document.getElementById('favListSidebar');
+            
+            // 保留"全部题目"
+            ul.innerHTML = ''; // 清空
+            
+            // 全部题目项
+            const allLi = document.createElement('li');
+            if (activeId === -1) allLi.className = 'active';
+            allLi.innerText = '全部题目';
+            allLi.onclick = () => selectFav(-1, allLi);
+            ul.appendChild(allLi);
+            
+            // 收藏夹项
+            favs.forEach(f => {
+                const li = document.createElement('li');
+                if (f.id === activeId) li.className = 'active';
+                li.onclick = () => selectFav(f.id, li);
+                li.innerHTML = `<span>${f.name}</span> <span class="count">${f.problem_ids.length}</span>`;
+                ul.appendChild(li);
+            });
+        }
+
+        // ---------------- 标签功能 ----------------
+        async function loadTags() {
+            const res = await fetch('/api/tags');
+            const tags = await res.json();
+            const container = document.getElementById('tagContainer');
+            
+            // "全部" 标签
+            container.innerHTML = `<span class="filter-tag active" onclick="selectTag('', this)">全部</span>`;
+            
+            tags.forEach(tag => {
+                const span = document.createElement('span');
+                span.className = 'filter-tag';
+                span.innerText = tag;
+                span.onclick = function() { selectTag(tag, this); };
+                container.appendChild(span);
+            });
+        }
+
+        function selectTag(tag, element) {
+            currentTag = tag;
+            // 切换 UI 样式
+            document.querySelectorAll('.filter-tag').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+            // 重新加载列表
+            resetAndLoad();
+        }
+
 
         // 删除逻辑
         async function deleteProblem(id, event) {
@@ -73,6 +175,7 @@
                     // 删除 DOM 元素而不是重新加载，体验更好
                     const row = document.getElementById(`row-${id}`);
                     if(row) row.remove();
+                    else console.warn(`Cannot find element row-${id} to remove`); // 调试日志
                 } else {
                     alert("删除失败");
                 }
@@ -82,14 +185,13 @@
         // 加载数据核心逻辑
         async function loadMore() {
             if (isLoading || !hasMore) return;
-            
             isLoading = true;
             const sentinel = document.getElementById('loading-sentinel');
             sentinel.innerText = "正在加载更多...";
             sentinel.style.display = 'block';
 
             try {
-                const url = `/api/problems?search=${encodeURIComponent(currentKeyword)}&offset=${currentOffset}&limit=${limit}`;
+                const url = `/api/problems?search=${encodeURIComponent(currentKeyword)}&tag=${encodeURIComponent(currentTag)}&fav_id=${currentFavId}&offset=${currentOffset}&limit=${limit}`;
                 const response = await fetch(url);
                 const resData = await response.json();
                 
@@ -109,19 +211,23 @@
                     const diffClass = `diff-${p.difficulty}`;
                     const diffText = difficultyMap[p.difficulty] || p.difficulty;
                     const algoText = p.algorithm || (p.tags ? p.tags.join(', ') : '-');
+                    const favClass = p.is_favorited ? 'btn-fav active' : 'btn-fav';
 
                     const row = document.createElement('div');
                     row.className = 'list-row';
                     row.id = `row-${p.id}`;
+                    
+                    // **核心修改：在 col-action 中添加收藏按钮**
                     row.innerHTML = `
                         <div class="col-id">${p.id}</div>
                         <div class="col-title"><a href="/problem.html?id=${p.id}">${p.title}</a></div>
                         <div class="col-algo">${algoText}</div>
                         <div class="col-diff ${diffClass}">${diffText}</div>
                         <div class="col-action">
-                            <button onclick="deleteProblem(${p.id}, event)" style="border:none; background:none; cursor:pointer; color:#ccc;">🗑️</button>
-                        </div>
-                    `;
+                        <button class="${favClass}" onclick="handleFavClick(${p.id}, ${p.is_favorited}, event)" title="收藏">★</button>
+                        <button onclick="deleteProblem(${p.id}, event)" style="..." title="删除">🗑️</button>
+                    </div>
+                `;
                     listDiv.appendChild(row);
                 });
 
@@ -139,6 +245,294 @@
             }
         }
 
+        // 点击星星的逻辑入口
+        async function handleFavClick(id, isFav, event) {
+            event.stopPropagation();
+            currentProblemIdToFav = id;
+            openManageFavModal(id);
+        }
+
+        // 打开统一管理模态框
+        async function openManageFavModal(problemId) {
+            const modal = document.getElementById('manageFavModal');
+            const container = document.getElementById('manageFavListContainer');
+            container.innerHTML = '<div style="text-align:center; color:#999;">加载中...</div>';
+            modal.style.display = "block";
+
+            try {
+                // 获取所有收藏夹
+                const res = await fetch('/api/favorites');
+                const favs = await res.json();
+                
+                container.innerHTML = '';
+                
+                if (favs.length === 0) {
+                    container.innerHTML = '<div style="padding:10px; text-align:center;">暂无收藏夹，请先新建</div>';
+                }
+
+                favs.forEach(f => {
+                    // 判断当前题目是否在这个收藏夹里
+                    const isInFav = f.problem_ids.includes(problemId);
+                    
+                    const div = document.createElement('div');
+                    div.className = 'fav-item';
+                    // 使用 onclick 触发 toggleFav
+                    // 注意：阻止 checkbox 的点击冒泡，防止触发 div 的点击
+                    div.innerHTML = `
+                        <input type="checkbox" id="fav-${f.id}" ${isInFav ? 'checked' : ''} 
+                            onchange="toggleFav(${f.id}, this.checked)">
+                        <label for="fav-${f.id}">${f.name} <span style="color:#999; font-size:0.8em;">(${f.problem_ids.length})</span></label>
+                    `;
+                    container.appendChild(div);
+                });
+
+            } catch (err) {
+                console.error(err);
+                container.innerText = "加载失败";
+            }
+        }
+
+        // 打开“取消收藏”模态框
+        async function openRemoveFavModal(problemId) {
+            const modal = document.getElementById('removeFavModal');
+            const container = document.getElementById('removeFavListContainer');
+            container.innerHTML = '<div style="text-align:center; color:#999;">加载中...</div>';
+            modal.style.display = "block";
+
+            try {
+                // 获取所有收藏夹数据
+                const res = await fetch('/api/favorites');
+                const favs = await res.json();
+                
+                container.innerHTML = '';
+                let count = 0;
+
+                if (favs.length === 0) {
+                    container.innerHTML = '<div style="padding:10px; text-align:center;">暂无收藏夹，请先新建</div>';
+                }
+
+                // 筛选出包含当前题目的收藏夹
+                favs.forEach(f => {
+                    const isInFav = f.problem_ids.includes(problemId);
+                    if (f.problem_ids.includes(problemId)) {
+                        count++;
+                        const div = document.createElement('div');
+                        div.className = 'fav-item';
+                        div.style.cursor = 'default'; // 这里不需要点击整行
+                        div.innerHTML = `
+                            <input type="checkbox" id="fav-${f.id}" ${isInFav ? 'checked' : ''} 
+                                onchange="toggleFav(${f.id}, this.checked)">
+                            <label for="fav-${f.id}">${f.name} <span style="color:#999; font-size:0.8em;">(${f.problem_ids.length})</span></label>
+                        `;
+                        container.appendChild(div);
+                    }
+                });
+
+                if (count === 0) {
+                    // 理论上不应该发生（isFav=true但没找到），为了容错
+                    container.innerHTML = '<p style="color:red">数据不同步，请刷新页面</p>';
+                }
+
+            } catch (err) {
+                console.error(err);
+                container.innerText = "加载失败";
+            }
+        }
+
+        function closeManageModal() {
+            document.getElementById('manageFavModal').style.display = "none";
+            // 关闭时刷新一下列表，更新星星状态（金/灰）
+            // 简单策略：重新加载当前视图
+            // 或者更精细地：如果该题目现在属于至少一个收藏夹，设为 active，否则 remove active
+            // 这里为了数据一致性，建议刷新
+            resetAndLoad(); 
+        }
+
+        // 切换收藏状态 (核心逻辑)
+        async function toggleFav(favId, isChecked) {
+            const url = isChecked ? '/api/favorites/add' : '/api/favorites/remove';
+            // 如果是 remove，我们之前的 API 参数是 problem_id + fav_id
+            // 如果是 add，参数是 problem_id + fav_id
+            // 参数名完全一致，完美！
+            
+            try {
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: `fav_id=${favId}&problem_id=${currentProblemIdToFav}`
+                });
+                
+                if (!res.ok) {
+                    alert("操作失败");
+                    // 回滚 checkbox 状态
+                    const checkbox = document.getElementById(`fav-${favId}`);
+                    checkbox.checked = !isChecked;
+                } else {
+                    // 操作成功，不需要弹窗干扰用户
+                    // TODO可以做一个小的 toast 提示，这里省略
+                    // 频繁刷新可能会有轻微的性能损耗或视觉跳动，但对于当前规模完全可接受
+                    loadSidebar(); 
+                }
+            } catch (err) {
+                alert("网络错误");
+            }
+        }
+
+        // 执行移除操作
+        // favId: 指定收藏夹ID，或者 -1 表示全部
+        async function removeFromFav(favId) {
+            if (favId === -1 && !confirm("确定要从所有收藏夹中移除吗？")) return;
+
+            try {
+                const res = await fetch('/api/favorites/remove', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    // 关键：传递 fav_id 参数
+                    body: `problem_id=${currentProblemIdToFav}&fav_id=${favId}`
+                });
+
+                if (res.ok) {
+                    // 逻辑判断：
+                    // 如果是移除全部 (-1)，直接关闭模态框并更新UI
+                    // 如果是移除单个，刷新模态框列表。如果列表空了，关闭模态框并更新UI。
+                    
+                    if (favId === -1) {
+                        updateUiAfterRemove();
+                        closeRemoveModal();
+                    } else {
+                        // 重新加载模态框内容，检查是否还剩其他收藏夹
+                        // 这里为了简单，先关闭，如果用户想继续删再点开（或者你可以优化为局部刷新）
+                        // 为了用户体验，我们检查一下是否还需要保留金星
+                        // 但前端不知道是否还有其他收藏夹，除非重新请求
+                        // 简单策略：操作一次后关闭模态框，刷新列表
+                        updateUiAfterRemove(); // 这里比较暴力，直接刷新列表
+                        closeRemoveModal();
+                    }
+                } else {
+                    alert("移除失败");
+                }
+            } catch (err) {
+                alert("请求错误");
+            }
+        }
+
+        // 移除成功后的 UI 更新
+        function updateUiAfterRemove() {
+            loadSidebar(); // 刷新侧边栏计数
+            
+            // 重新加载列表是最稳妥的，能正确计算 is_favorited 状态
+            // 如果不想重新加载，需要复杂的逻辑去判断该题目是否还存在于其他收藏夹中
+            // 鉴于这是后台管理性质的操作，重新加载是可以接受的
+            
+            // 如果当前是在特定的收藏夹视图下移除了题目，那么该题目应该从列表中消失
+            if (currentFavId !== -1) {
+                // 如果只是从当前视图的收藏夹移除了，重新加载会自动去掉它
+                resetAndLoad(); 
+            } else {
+                // 如果是在"全部题目"视图，我们需要知道它是否完全被移除了才能决定是否变灰星
+                // 为了数据一致性，重新加载
+                resetAndLoad();
+            }
+        }
+
+        // ---------------- 收藏夹功能 ----------------
+    
+        // 打开模态框
+        async function openFavModal(problemId, event) {
+            event.stopPropagation(); // 防止触发行点击跳转
+            currentProblemIdToFav = problemId;
+            const modal = document.getElementById('favModal');
+            modal.style.display = "block";
+            
+            // 加载收藏夹列表
+            const res = await fetch('/api/favorites');
+            const favs = await res.json();
+            const container = document.getElementById('favListContainer');
+            container.innerHTML = '';
+            
+            favs.forEach(f => {
+                const div = document.createElement('div');
+                div.className = 'fav-item';
+                div.innerText = f.name + ` (${f.problem_ids.length})`;
+                div.onclick = () => addToFav(f.id);
+                container.appendChild(div);
+            });
+        }
+        
+        function closeModal() {
+            document.getElementById('favModal').style.display = "none";
+        }
+        
+        // 执行添加
+        async function addToFav(favId) {
+            const res = await fetch('/api/favorites/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: `fav_id=${favId}&problem_id=${currentProblemIdToFav}`
+            });
+            if (res.ok) {
+                alert("已添加!");
+                closeModal();
+                loadSidebar(); // 刷新侧边栏计数
+                // 刷新列表以更新星星状态 (或者手动更新 DOM)
+                // 简单起见，如果不重置列表，至少要把当前星星变黄
+                const row = document.getElementById(`row-${currentProblemIdToFav}`);
+                if(row) {
+                    const btn = row.querySelector('.btn-fav');
+                    btn.classList.add('active');
+                    // 更新点击事件为取消收藏
+                    // 注意：这里用闭包可能会有坑，最稳妥是重新加载列表
+                    // 但为了体验，我们可以只改样式，下次加载自然正确
+                    btn.onclick = (e) => handleFavClick(currentProblemIdToFav, true, e);
+                }
+            }else {
+                alert("添加失败");
+            }
+        }
+
+        // 新建收藏夹
+        async function createFavorite() {
+            const name = document.getElementById('newFavName').value;
+            if (!name) return;
+            
+            const res = await fetch('/api/favorites/create', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: `name=${encodeURIComponent(name)}`
+            });
+            
+            if (res.ok) {
+                document.getElementById('newFavName').value = '';
+                // **刷新侧边栏，显示新创建的收藏夹**
+                loadSidebar(); 
+                // 刷新列表，新创建的收藏夹会出现在列表里，且未勾选
+                openManageFavModal(currentProblemIdToFav); 
+            }
+        }
+
+        // 选择收藏夹
+        function selectFav(id, el) {
+            currentFavId = id;
+            // UI 更新
+            document.querySelectorAll('.sidebar li').forEach(l => l.classList.remove('active'));
+            el.classList.add('active');
+            // 重置列表
+            resetAndLoad();
+        }
+
+        // 关闭移除模态框
+        function closeRemoveModal() {
+            document.getElementById('removeFavModal').style.display = "none";
+        }
+
+        // 点击窗口外部关闭模态框
+        window.onclick = function(event) {
+            const modal = document.getElementById('manageFavModal');
+            if (event.target == modal) {
+                closeManageModal();
+            }
+        }
+
         // 监听滚动事件实现无限加载
         window.addEventListener('scroll', () => {
             const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
@@ -150,6 +544,8 @@
 
         // 初始加载
         resetAndLoad();
+        init();
     </script>
+    
 </body>
 </html>

@@ -105,7 +105,7 @@ a:hover { text-decoration: underline; }
 .col-title a:hover { color: #3498db; }
 .col-algo { width: 200px; flex-shrink: 0; color: #666; font-size: 0.9em; }
 .col-diff { width: 100px; flex-shrink: 0; text-align: right; }
-.col-action { width: 60px; flex-shrink: 0; text-align: right; }
+.col-action { width: 90px; flex-shrink: 0; text-align: right; white-space: nowrap; }
 
 /* 难度颜色 */
 .diff-Easy { color: #00b894; }
@@ -168,4 +168,119 @@ a:hover { text-decoration: underline; }
     border-radius: 5px;
     overflow-x: auto;
     font-family: Consolas, "Courier New", monospace;
+}
+
+/* 标签过滤区 */
+.tag-filter-area {
+    margin-bottom: 20px;
+    padding: 10px 0;
+    border-bottom: 1px dashed #eee;
+}
+.filter-tag {
+    display: inline-block;
+    padding: 5px 12px;
+    margin: 0 8px 8px 0;
+    background-color: #f0f2f5;
+    color: #666;
+    border-radius: 15px;
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+}
+.filter-tag:hover {
+    background-color: #e4e6e9;
+}
+.filter-tag.active {
+    background-color: #e8f0fe;
+    color: #1967d2;
+    border-color: #d2e3fc;
+    font-weight: bold;
+}
+
+/* 收藏按钮样式 */
+.btn-fav {
+    background: none; 
+    border: none; 
+    cursor: pointer; 
+    font-size: 1.2em; 
+    color: #ccc; /* 默认灰色 */
+    transition: color 0.2s;
+    margin-right: 5px; /* 两个按钮之间的间距 */
+}
+.btn-fav:hover { color: #f1c40f; }
+
+/* 模态框 (用于选择收藏夹) */
+.modal {
+    display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%;
+    background-color: rgba(0,0,0,0.5);
+}
+.modal-content {
+    background-color: white; margin: 15% auto; padding: 20px; border-radius: 8px; width: 300px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+}
+.modal-header { display: flex; justify-content: space-between; margin-bottom: 15px; }
+.close { cursor: pointer; font-size: 1.5em; color: #aaa; }
+.fav-item { 
+    padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; 
+}
+.fav-item:hover { background-color: #f9f9f9; }
+
+/* 布局容器 */
+.main-container {
+    display: flex;
+    gap: 30px;
+    margin-top: 20px;
+}
+
+/* 左侧边栏 */
+.sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    height: fit-content;
+}
+.sidebar h3 { margin-top: 0; padding-bottom: 10px; border-bottom: 1px solid #eee; font-size: 1.1em; }
+.sidebar ul { list-style: none; padding: 0; margin: 0; }
+.sidebar li { 
+    padding: 10px; 
+    cursor: pointer; 
+    border-radius: 4px; 
+    color: #555;
+    transition: background 0.2s;
+    display: flex; justify-content: space-between;
+}
+.sidebar li:hover { background-color: #f5f5f5; }
+.sidebar li.active { background-color: #e8f0fe; color: #1967d2; font-weight: bold; }
+.sidebar .count { background: #eee; padding: 2px 6px; border-radius: 10px; font-size: 0.8em; }
+
+/* 右侧内容区 */
+.content-area {
+    flex-grow: 1;
+    min-width: 0; /* 防止 overflow */
+}
+
+/* 已收藏星星样式 */
+.btn-fav.active { color: #f1c40f; }
+
+/* 收藏夹列表项样式优化 */
+.fav-item {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+.fav-item:hover { background-color: #f9f9f9; }
+.fav-item input[type="checkbox"] {
+    margin-right: 10px;
+    transform: scale(1.2);
+    cursor: pointer;
+}
+.fav-item label {
+    flex-grow: 1;
+    cursor: pointer;
 }

@@ -1,31 +1,31 @@
 [
     {
-        "algorithm": "Hash Map",
-        "code": "class Solution { ... }",
-        "description": "Given an array of integers, return indices of the two numbers such that they add up to a specific target.",
+        "algorithm": "哈希表",
+        "code": "class Solution {\r\npublic:\r\n    vector<int> twoSum(vector<int>& nums, int target) {\r\n        unordered_map<int, int> mmap;\r\n        vector<int> ret;\r\n        for(int i = 0; i < nums.size(); i++){\r\n            if(mmap.find(target-nums[i]) != mmap.end()){\r\n                return {i, mmap[target-nums[i]]};\r\n            }\r\n            if(mmap.find(nums[i]) == mmap.end()){\r\n                mmap[nums[i]] = i;\r\n            }\r\n        }\r\n        return {};\r\n    }\r\n};",
+        "description": "给定一个整数数组 nums 和一个整数目标值 target，请你在该数组中找出 和为目标值 target  的那 两个 整数，并返回它们的数组下标。\r\n\r\n你可以假设每种输入只会对应一个答案，并且你不能使用两次相同的元素。\r\n\r\n你可以按任意顺序返回答案。\r\n\r\n示例 1：\r\n\r\n输入：nums = [2,7,11,15], target = 9\r\n输出：[0,1]\r\n解释：因为 nums[0] + nums[1] == 9 ，返回 [0, 1] 。\r\n示例 2：\r\n\r\n输入：nums = [3,2,4], target = 6\r\n输出：[1,2]\r\n示例 3：\r\n\r\n输入：nums = [3,3], target = 6\r\n输出：[0,1]",
         "difficulty": "Easy",
         "id": 1,
-        "solution_idea": "Use a hash map to store the complement of each number as we iterate.",
+        "solution_idea": "在迭代过程中，使用哈希表存储每个数字的补码。\r\n",
         "space_complexity": "O(n)",
         "tags": [
-            "Array",
-            "Hash Table"
+            "数组",
+            "哈希表"
         ],
         "time_complexity": "O(n)",
-        "title": "Two Sum"
+        "title": "两数之和"
     },
     {
-        "algorithm": "Iteration",
-        "code": "class Solution { ... }",
-        "description": "Reverse a singly linked list.",
+        "algorithm": "链表",
+        "code": "/**\r\n * Definition for singly-linked list.\r\n * struct ListNode {\r\n *     int val;\r\n *     ListNode *next;\r\n *     ListNode() : val(0), next(nullptr) {}\r\n *     ListNode(int x) : val(x), next(nullptr) {}\r\n *     ListNode(int x, ListNode *next) : val(x), next(next) {}\r\n * };\r\n */\r\nclass Solution {\r\npublic:\r\n    ListNode* addTwoNumbers(ListNode* l1, ListNode* l2) {\r\n        ListNode* dummy = new ListNode(0);  // 虚拟头节点\r\n        ListNode* curr = dummy;\r\n        int carry = 0;\r\n        \r\n        // 遍历两个链表，直到都为空且没有进位\r\n        while (l1 != nullptr || l2 != nullptr || carry != 0) {\r\n            // 获取当前节点的值，如果节点为空则为0\r\n            int x = (l1 != nullptr) ? l1->val : 0;\r\n            int y = (l2 != nullptr) ? l2->val : 0;\r\n            \r\n            // 计算当前位的和（包括进位）\r\n            int sum = x + y + carry;\r\n            \r\n            // 计算新的进位和当前位的值\r\n            carry = sum / 10;\r\n            int digit = sum % 10;\r\n            \r\n            // 创建新节点\r\n            curr->next = new ListNode(digit);\r\n            curr = curr->next;\r\n            \r\n            // 移动到下一个节点\r\n            if (l1 != nullptr) l1 = l1->next;\r\n            if (l2 != nullptr) l2 = l2->next;\r\n        }\r\n        \r\n        ListNode* result = dummy->next;\r\n        delete dummy;  // 释放虚拟头节点\r\n        return result;\r\n    }\r\n};",
+        "description": "给你两个 非空 的链表，表示两个非负的整数。它们每位数字都是按照 逆序 的方式存储的，并且每个节点只能存储 一位 数字。\r\n\r\n请你将两个数相加，并以相同形式返回一个表示和的链表。\r\n\r\n你可以假设除了数字 0 之外，这两个数都不会以 0 开头。\r\n\r\n输入：l1 = [2,4,3], l2 = [5,6,4]\r\n输出：[7,0,8]\r\n解释：342 + 465 = 807.\r\n示例 2：\r\n\r\n输入：l1 = [0], l2 = [0]\r\n输出：[0]\r\n示例 3：\r\n\r\n输入：l1 = [9,9,9,9,9,9,9], l2 = [9,9,9,9]\r\n输出：[8,9,9,9,0,0,0,1]",
         "difficulty": "Medium",
         "id": 2,
-        "solution_idea": "Use three pointers: prev, curr, next.",
+        "solution_idea": "模拟加法过程，两个链表的节点对应相加并判断是否产生进位\r\n对于较短链表，认为接下来所有位都为0",
         "space_complexity": "O(1)",
         "tags": [
-            "Linked List"
+            "New"
         ],
-        "time_complexity": "O(n)",
-        "title": "Reverse Linked List"
+        "time_complexity": "O(max{m, n})",
+        "title": "两数相加"
     }
 ]
