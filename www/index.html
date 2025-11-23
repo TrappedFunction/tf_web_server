@@ -88,6 +88,35 @@
 
         function handleEnter(e) { if (e.key === 'Enter') resetAndLoad(); }
 
+        // **新增：封装 fetch，支持自动重试一次**
+        async function fetchWithRetry(url, options = {}, retries = 1, timeout = 5000) {
+            const fetchWithTimeout = (url, options) => {
+                const controller = new AbortController();
+                const id = setTimeout(() => controller.abort(), timeout);
+                return fetch(url, { ...options, signal: controller.signal })
+                    .then(response => {
+                        clearTimeout(id);
+                        return response;
+                    })
+                    .catch(error => {
+                        clearTimeout(id);
+                        throw error;
+                    });
+            };
+
+            for (let i = 0; i <= retries; i++) {
+                try {
+                    return await fetchWithTimeout(url, options);
+                } catch (err) {
+                    const isLastAttempt = i === retries;
+                    if (isLastAttempt) throw err;
+                    console.warn(`请求失败 (${err.name}: ${err.message})，正在重试...`);
+                    // 如果是 AbortError (超时)，我们可能不需要等待就重试
+                    // 如果是其他网络错误，也可以立即重试
+                }
+            }
+        }
+
         // 重置搜索（点击搜索按钮或刷新时）
         function resetAndLoad() {
             currentKeyword = document.getElementById('searchBox').value.trim();
@@ -109,7 +138,7 @@
             // 记录当前选中的 ID，以便重绘后恢复高亮
             // 注意：currentFavId 是全局变量，这步其实是多余的，但逻辑上更清晰
             const activeId = currentFavId; 
-            const res = await fetch('/api/favorites');
+            const res = await fetchWithRetry('/api/favorites');
             const favs = await res.json();
             const ul = document.getElementById('favListSidebar');
             
@@ -135,7 +164,7 @@
 
         // ---------------- 标签功能 ----------------
         async function loadTags() {
-            const res = await fetch('/api/tags');
+            const res = await fetchWithRetry('/api/tags');
             const tags = await res.json();
             const container = document.getElementById('tagContainer');
             
@@ -166,7 +195,7 @@
             event.stopPropagation();
             if (!confirm("确定要删除这道题吗？")) return;
             try {
-                const response = await fetch('/api/problems/delete', {
+                const response = await fetchWithRetry('/api/problems/delete', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                     body: `id=${id}`
@@ -175,7 +204,17 @@
                     // 删除 DOM 元素而不是重新加载，体验更好
                     const row = document.getElementById(`row-${id}`);
                     if(row) row.remove();
-                    else console.warn(`Cannot find element row-${id} to remove`); // 调试日志
+                    // 因为删除题目可能触发了收藏夹的级联更新或删除
+                    loadSidebar();
+                    // 3. (可选) 如果当前正在浏览某个收藏夹，且该收藏夹因此被删除了
+                    // 我们可以检查侧边栏刷新后 currentFavId 是否还存在，不存在则重置为全部
+                    // 这里简单处理：如果当前是收藏夹视图，刷新一下列表可能会更好，防止显示空列表
+                    if (currentFavId !== -1) {
+                        // 稍微延迟一点刷新，或者直接调用 resetAndLoad()
+                        // 但考虑到 row.remove() 已经更新了视图，只要侧边栏数字对就行
+                        // 如果收藏夹被删了，用户再次点击会失败或者加载全部，体验稍差
+                        // TODO完美的做法是检查 favs 列表，这里保持简单即可。
+                    }
                 } else {
                     alert("删除失败");
                 }
@@ -192,7 +231,7 @@
 
             try {
                 const url = `/api/problems?search=${encodeURIComponent(currentKeyword)}&tag=${encodeURIComponent(currentTag)}&fav_id=${currentFavId}&offset=${currentOffset}&limit=${limit}`;
-                const response = await fetch(url);
+                const response = await fetchWithRetry(url);
                 const resData = await response.json();
                 
                 const problems = resData.data;
@@ -261,7 +300,7 @@
 
             try {
                 // 获取所有收藏夹
-                const res = await fetch('/api/favorites');
+                const res = await fetchWithRetry('/api/favorites');
                 const favs = await res.json();
                 
                 container.innerHTML = '';
@@ -301,7 +340,7 @@
 
             try {
                 // 获取所有收藏夹数据
-                const res = await fetch('/api/favorites');
+                const res = await fetchWithRetry('/api/favorites');
                 const favs = await res.json();
                 
                 container.innerHTML = '';
@@ -356,7 +395,7 @@
             // 参数名完全一致，完美！
             
             try {
-                const res = await fetch(url, {
+                const res = await fetchWithRetry(url, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                     body: `fav_id=${favId}&problem_id=${currentProblemIdToFav}`
@@ -384,7 +423,7 @@
             if (favId === -1 && !confirm("确定要从所有收藏夹中移除吗？")) return;
 
             try {
-                const res = await fetch('/api/favorites/remove', {
+                const res = await fetchWithRetry('/api/favorites/remove', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                     // 关键：传递 fav_id 参数
@@ -445,7 +484,7 @@
             modal.style.display = "block";
             
             // 加载收藏夹列表
-            const res = await fetch('/api/favorites');
+            const res = await fetchWithRetry('/api/favorites');
             const favs = await res.json();
             const container = document.getElementById('favListContainer');
             container.innerHTML = '';
@@ -465,7 +504,7 @@
         
         // 执行添加
         async function addToFav(favId) {
-            const res = await fetch('/api/favorites/add', {
+            const res = await fetchWithRetry('/api/favorites/add', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                 body: `fav_id=${favId}&problem_id=${currentProblemIdToFav}`
@@ -495,7 +534,7 @@
             const name = document.getElementById('newFavName').value;
             if (!name) return;
             
-            const res = await fetch('/api/favorites/create', {
+            const res = await fetchWithRetry('/api/favorites/create', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                 body: `name=${encodeURIComponent(name)}`

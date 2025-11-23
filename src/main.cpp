@@ -16,7 +16,7 @@
 #include <list>
 
 std::string base_path, project_root_path;
-const int kIdleConnectionTimeout = 60; // 60秒空闲超时
+const int kIdleConnectionTimeout = 2; // 60秒空闲超时
 std::unique_ptr<AsyncLogging> g_async_log;
 
 // 全局的或由 HttpServer 类持有的 Router 对象
@@ -41,14 +41,21 @@ void onMessage(const std::shared_ptr<Connection>& conn, Buffer* buf){
         parse_ok = request.parse(buf);
         if(request.gotAll()){
             // 活动发生，先取消旧的定时器
-            if(conn->getContext().has_value()){
-                TimerId timer_id = std::any_cast<TimerId>(conn->getContext());
-                conn->getLoop()->cancel(timer_id);
+            TimerId old_id = conn->getTimerId();
+            if (!old_id.expired()) { 
+                conn->getLoop()->cancel(old_id);
             }
             HttpResponse response;
             response.addHeader("Server", "TF's Cpp Web Server");
             bool keep_alive = request.keepAlive();
             response.setKeepAlive(keep_alive);
+
+            // 告诉客户端 Keep-Alive 的超时参数
+            if (keep_alive) {
+                // 告诉浏览器：建议保持55秒（比服务器实际的60秒略短，防止竞态）
+                // max=10000 表示在这个连接上最多处理10000个请求
+                response.addHeader("Keep-Alive", "timeout=1, max=10000");
+            }
 
             onHttpRequest(request, &response);
 
@@ -64,10 +71,10 @@ void onMessage(const std::shared_ptr<Connection>& conn, Buffer* buf){
                     if(conn_ptr){
                         // 如果超时，服务器主动关闭连接
                         std::cout << "Connection from [" << conn_ptr->getPeerAddrStr() << "] timed out, closing." << std::endl;
-                        conn_ptr->shutdown();
+                        conn_ptr->forceClose(); 
                     }
                 });
-                conn->setContext(new_timer_id);
+                conn->setTimerId(new_timer_id);
             }else{
                 conn->shutdown();
             }

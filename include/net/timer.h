@@ -18,7 +18,7 @@ private:
     Timestamp expiration_;
 };
 
-using TimerId = Timer*;
+using TimerId = std::weak_ptr<Timer>;
 
 class TimerQueue{
 public:
@@ -41,11 +41,12 @@ public:
 
 
 private:
-    using Entry = std::pair<Timestamp, TimerId>;
+    using TimerPtr = std::shared_ptr<Timer>;
+    using Entry = std::pair<Timestamp, TimerPtr>;
     using TimerList = std::set<Entry>;
-    using ActiveTimers = std::set<TimerId>; // 快速查找TimerId是否存在
 
     EventLoop* loop_;
     TimerList timers_; // 作为底层的优先队列，会根据Timestamp排序
-    ActiveTimers active_timers_;
+    using ActiveTimers = std::set<TimerId, std::owner_less<TimerId>>;
+    ActiveTimers active_timers_; // 用于取消
 };

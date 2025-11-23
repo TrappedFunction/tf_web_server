@@ -1,5 +1,6 @@
 #include "connection.h"
 #include "net/timer.h"
+#include "utils/logger.h"
 #include <iostream>
 #include <cerrno>
 #include <arpa/inet.h>
@@ -70,22 +71,21 @@ void Connection::handleHandShake(){
         onConnectionEstablished();
 
         // 握手后可能已经有数据可读，所以立即调用read
-        if(SSL_pending(ssl_.get()) > 0){
-            handleRead();
-        }
+        handleRead();
+
     }else{
         int err = SSL_get_error(ssl_.get(), ret);
         if(err == SSL_ERROR_WANT_READ){
             // 需要更多数据才能继续握手，保持监听读事件
             channel_->enableReading();
-            channel_->disableWriting();
+            if(channel_->isWriting()) channel_->disableWriting();
         }else if(err == SSL_ERROR_WANT_WRITE){
             // 需要发送数据才能继续握手，监听写事件
             channel_->enableWriting();
-            channel_->disableReading();
+            if(channel_->isReading()) channel_->disableReading();
         }else{
             // 握手失败
-            ERR_print_errors_fp(stderr);
+            LOG_ERROR << "SSL Handshake failed, fd=" << socket_->getFd();
             handleError();
         }
     }
@@ -103,7 +103,7 @@ void Connection::send(const std::string& msg){
 void Connection::sendInLoop(const std::string& msg){
     loop_->assertInLoopThread();
     if(state_ == kDisconnected || state_ == kDisconnecting){
-        // Log WARN: disconnected, give up writing
+        LOG_WARN << "disconnected, give up writing";
         return;
     }
     ssize_t nwrote = 0;
@@ -168,24 +168,38 @@ void Connection::send(Buffer* buf){
 void Connection::handleRead() {
     loop_->assertInLoopThread();
     int saved_errno = 0;
-
+    // 如果已经处于断开流程，忽略数据
+    if (state_ == kDisconnecting || state_ == kDisconnected) return;
     if (ssl_) { // HTTPS 逻辑
         while (true) {
             char buf[65536];
             int n = SSL_read(ssl_.get(), buf, sizeof(buf));
             if (n > 0) {
                 input_buffer_.append(buf, n);
+                updateLastActiveTime(); // 成功读到数据，更新时间
             } else {
                 int err = SSL_get_error(ssl_.get(), n);
-                if (err == SSL_ERROR_ZERO_RETURN) { // 正常关闭
+                if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
+                    break; 
+                } else if (err == SSL_ERROR_ZERO_RETURN) {
+                    // **核心修正**: 收到 TLS Close Notify，只表示对端结束发送。
+                    // 在 Keep-Alive 模式下，我们不应立即关闭连接，而是等待逻辑层处理。
+                    // 如果逻辑层解析完请求后决定关闭，它会调用 shutdown。
+                    // 这里我们只退出循环，视为“没有更多数据”。
+                    break; 
+                } else if (err == SSL_ERROR_SYSCALL) {
+                    // 系统错误，通常意味着连接重置或非正常断开
+                    if (errno != 0) {
+                        LOG_ERROR << "SSL_read syscall error: " << strerror(errno);
+                    }
+                    handleClose(); // 直接关闭
                     break;
-                } else if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
-                    // 真正发生错误
-                    ERR_print_errors_fp(stderr);
+                } else {
+                    // 其他 SSL 错误
+                    LOG_ERROR << "SSL_read error code: " << err;
                     handleError();
+                    break;
                 }
-                // 对于 WANT_READ/WANT_WRITE，直接退出循环等待下一次事件
-                break;
             }
         }
     } else { // HTTP 逻辑
@@ -207,10 +221,21 @@ void Connection::handleRead() {
         }
     }
 
+    if (state_ == kDisconnecting) {
+        // 既然正在断开，读到的数据没有意义了，直接忽略或强制关闭
+        // 这里选择不做 callback，避免 sendInLoop 的尴尬
+        return;
+    }
+
     // 统一的后续处理
+    if (state_ != kConnected) return;
     if (input_buffer_.readableBytes() > 0) {
-        updateLastActiveTime();
-        message_callback_(shared_from_this(), &input_buffer_);
+        if (state_ == kConnected) {
+            updateLastActiveTime();
+            message_callback_(shared_from_this(), &input_buffer_);
+        } else {
+            LOG_WARN << "Received data in non-connected state";
+        }
     }
 }
 
@@ -294,9 +319,9 @@ void Connection::handleClose(){
         // 仍然需要通知上层连接已关闭
         std::cout << "Connection from [" << getPeerAddrStr() << "] is closing." << std::endl;
         // 关闭连接时，取消与之关联的定时器
-        if(context_.has_value()){
-            TimerId timer_id = std::any_cast<TimerId>(context_);
-            loop_->cancel(timer_id);
+        TimerId id = getTimerId();
+        if (!id.expired()) {
+            loop_->cancel(id);
         }
 
         close_callback_(guard_this);
@@ -380,4 +405,19 @@ void Connection::onConnectionEstablished() {
     channel_->enableReading();
     // 调用应用层设置的onConnection回调
     connection_callback_(shared_from_this());
+}
+
+void Connection::forceClose() {
+    if (loop_->isInLoopThread()) {
+        forceCloseInLoop();
+    } else {
+        loop_->queueInLoop(std::bind(&Connection::forceCloseInLoop, shared_from_this()));
+    }
+}
+
+void Connection::forceCloseInLoop() {
+    loop_->assertInLoopThread();
+    if (state_ == kConnected || state_ == kDisconnecting) {
+        handleClose(); // 直接进入关闭流程，清理资源
+    }
 }

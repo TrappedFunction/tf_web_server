@@ -109,11 +109,11 @@ void Server::onConnection(const ConnectionPtr& conn){
         std::shared_ptr<Connection> conn_ptr = weak_conn.lock();
         if(conn_ptr){
             std::cout << "Connection from [" << conn_ptr->getPeerAddrStr() << "] timed out, closing." << std::endl;
-            conn_ptr->shutdown();
+            conn_ptr->forceClose(); 
         }
     });
     // 将TimerId存入Connection的上下文
-    conn->setContext(timer_id);
+    conn->setTimerId(timer_id);
 }
 
 void Server::enableSsl(const std::string& cert_path, const std::string& key_path){

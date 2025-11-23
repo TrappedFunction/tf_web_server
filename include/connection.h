@@ -5,6 +5,7 @@
 #include "buffer.h"
 #include "utils/timestamp.h"
 #include "http_request.h"
+#include "net/timer.h"
 #include <memory>
 #include <functional>
 #include <netinet/in.h>
@@ -44,6 +45,9 @@ public:
     // 关闭连接的公共接口
     void shutdown();
 
+    // 强制关闭接口
+    void forceClose(); 
+
     // 设置当前连接的状态
     void setState(StateE s) { state_ = s; }
 
@@ -52,9 +56,9 @@ public:
     int getFd() const { return socket_->getFd(); }
     EventLoop* getLoop() const { return loop_; }
 
-    // 用于存储上下文，即TimerId
-    void setContext(const std::any& context) { context_ = context; }
-    const std::any& getContext() const { return context_; }
+    // 直接使用具体的类型，更清晰
+    void setTimerId(TimerId id) { timer_id_ = id; }
+    TimerId getTimerId() const { return timer_id_; }
 
     // 用于超时管理的方法
     void updateLastActiveTime() { last_active_time_ = Timestamp::now(); }
@@ -64,15 +68,16 @@ public:
 private:
     // 在Server主循环中被调用，处理读事件
     void handleRead();
-    // TODO 在Server的主循环被调用，处理写事件，用于高并发模型，暂不实现
+    // 在Server的主循环被调用，处理写事件
     void handleWrite();
     // 处理关闭事件
     void handleClose();
     // 处理错误事件
     void handleError();
-    
+
     void sendInLoop(const std::string& msg);
     void shutdownInLoop();
+    void forceCloseInLoop(); 
 
     // SSL握手逻辑
     void handleHandShake();
@@ -92,7 +97,7 @@ private:
 
     struct sockaddr_in peer_addr_;
     StateE state_;
-    std::any context_;
+    TimerId timer_id_;
     
     Timestamp last_active_time_;
 
