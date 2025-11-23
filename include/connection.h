@@ -38,6 +38,7 @@ public:
 
     // 当建立连接时由Server调用
     void connectionEstablished();
+    void setupHttpContext();
 
     // 获取对端地址的公共方法
     std::string getPeerAddrStr() const;

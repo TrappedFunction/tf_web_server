@@ -37,23 +37,53 @@ std::string Connection::getPeerAddrStr() const {
     return std::string(ip_str) + ":" + std::to_string(port);
 }
 
+void Connection::setupHttpContext() {
+    loop_->assertInLoopThread();
+    setState(kConnected);
+
+    // 设置 HTTP 业务回调 (Read/Write/Close/Error)
+    std::weak_ptr<Connection> weak_self = shared_from_this();
+    channel_->setReadCallback([weak_self]() {
+        if (auto ptr = weak_self.lock()) ptr->handleRead();
+    });
+    channel_->setWriteCallback([weak_self]() {
+        if (auto ptr = weak_self.lock()) ptr->handleWrite();
+    });
+    channel_->setCloseCallback([weak_self]() {
+        if (auto ptr = weak_self.lock()) ptr->handleClose();
+    });
+    channel_->setErrorCallback([weak_self]() {
+        if (auto ptr = weak_self.lock()) ptr->handleError();
+    });
+    
+    // 注意：这里不再调用 connection_callback_，因为它已经在连接刚建立时调用过了
+}
+
 void Connection::connectionEstablished(){
     loop_->assertInLoopThread();
+
+    // 1. 绑定 Channel 生命周期
+    channel_->tie(shared_from_this());
+    channel_->enableReading(); // 开启监听
+
+    // 无论 HTTP 还是 HTTPS，连接建立那一刻就启动定时器
+    // 这会调用 Server::onConnection，从而设置初始的 60秒 超时
+    if (connection_callback_) {
+        connection_callback_(shared_from_this());
+    }
     // 根据是否有SSL，决定使用HTTPS处理还是HTTP处理
     if(ssl_){
         // 如果是HTTPS，设置握手回调并开始握手
         std::weak_ptr<Connection> weak_self = shared_from_this();
-        channel_->setReadCallback([weak_self]() {
-            if (auto guard_ptr = weak_self.lock()) guard_ptr->handleHandShake();
-        });
-        channel_->setWriteCallback([weak_self]() {
-            if (auto guard_ptr = weak_self.lock()) guard_ptr->handleHandShake();
-        });
-        channel_->enableReading();
+        auto handshake_cb = [weak_self]() {
+            if (auto ptr = weak_self.lock()) ptr->handleHandShake();
+        };
+        channel_->setReadCallback(handshake_cb);
+        channel_->setWriteCallback(handshake_cb);
         handleHandShake(); // 立即尝试握手
     }else{
         // http
-        onConnectionEstablished();
+        setupHttpContext();
     }
     
 }
@@ -68,10 +98,12 @@ void Connection::handleHandShake(){
         ssl_state_ = SslState::kEstablished;
 
         // 将回调切换到正常的HTTP数据处理
-        onConnectionEstablished();
+        setupHttpContext();
 
         // 握手后可能已经有数据可读，所以立即调用read
-        handleRead();
+        if (SSL_pending(ssl_.get()) > 0) {
+            handleRead();
+        }
 
     }else{
         int err = SSL_get_error(ssl_.get(), ret);
@@ -198,14 +230,18 @@ void Connection::handleRead() {
                     // 系统错误，通常意味着连接重置或非正常断开
                     if (errno != 0) {
                         LOG_ERROR << "SSL_read syscall error: " << strerror(errno);
+                    }else {
+                        // errno == 0 表示虽然是 SYSCALL 错误，但实际上是 EOF (对端关闭了 TCP)
+                        // 这在浏览器强制刷新或关闭标签页时很常见
+                        LOG_INFO << "SSL_read EOF (unexpected), fd=" << socket_->getFd();
                     }
                     handleClose(); // 直接关闭
-                    break;
+                    return;
                 } else {
                     // 其他 SSL 错误
                     LOG_ERROR << "SSL_read error code: " << err;
                     handleError();
-                    break;
+                    return;
                 }
             }
         }

@@ -16,7 +16,7 @@
 #include <list>
 
 std::string base_path, project_root_path;
-const int kIdleConnectionTimeout = 2; // 60秒空闲超时
+const int kIdleConnectionTimeout = 60; // 60秒空闲超时
 std::unique_ptr<AsyncLogging> g_async_log;
 
 // 全局的或由 HttpServer 类持有的 Router 对象
@@ -54,7 +54,7 @@ void onMessage(const std::shared_ptr<Connection>& conn, Buffer* buf){
             if (keep_alive) {
                 // 告诉浏览器：建议保持55秒（比服务器实际的60秒略短，防止竞态）
                 // max=10000 表示在这个连接上最多处理10000个请求
-                response.addHeader("Keep-Alive", "timeout=1, max=10000");
+                response.addHeader("Keep-Alive", "timeout=55, max=10000");
             }
 
             onHttpRequest(request, &response);

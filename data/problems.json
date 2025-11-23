@@ -23,7 +23,8 @@
         "solution_idea": "模拟加法过程，两个链表的节点对应相加并判断是否产生进位\r\n对于较短链表，认为接下来所有位都为0",
         "space_complexity": "O(1)",
         "tags": [
-            "New"
+            "New",
+            "链表"
         ],
         "time_complexity": "O(max{m, n})",
         "title": "两数相加"

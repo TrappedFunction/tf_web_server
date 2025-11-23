@@ -173,12 +173,12 @@ void EventLoop::removeConnectionInLoop(const ConnectionPtr& conn){
         // 在此之前需移除Channel
         conn->getChannel()->remove();
     });
-    std::cout << "EventLoop " << this << " current connections (" << connections_.size() << "): [ ";
-    for (const auto& pair : connections_) {
-        std::cout << pair.first << " ";
-    }
-LOG_INFO << "EventLoop " << this << " remove connection fd=" << fd;
-    std::cout << "]" << std::endl;
+    // std::cout << "EventLoop " << this << " current connections (" << connections_.size() << "): [ ";
+    // for (const auto& pair : connections_) {
+    //     std::cout << pair.first << " ";
+    // }
+    LOG_INFO << "EventLoop " << this << " remove connection fd=" << fd;
+    // std::cout << "]" << std::endl;
 }
 
 void EventLoop::addConnection(int fd, ConnectionPtr conn){
