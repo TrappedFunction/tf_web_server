@@ -108,8 +108,8 @@
                 try {
                     return await fetchWithTimeout(url, options);
                 } catch (err) {
-                    const isLastAttempt = i === retries;
-                    if (isLastAttempt) throw err;
+                    // const isLastAttempt = i === retries;
+                    // if (isLastAttempt) throw err;
                     console.warn(`请求失败 (${err.name}: ${err.message})，正在重试...`);
                     // 如果是 AbortError (超时)，我们可能不需要等待就重试
                     // 如果是其他网络错误，也可以立即重试

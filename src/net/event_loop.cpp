@@ -3,6 +3,7 @@
 #include "net/poller.h"
 #include "connection.h"
 #include "net/timer.h"
+#include "utils/logger.h"
 #include <cassert>
 #include <iostream>
 #include <sys/eventfd.h>
@@ -172,9 +173,16 @@ void EventLoop::removeConnectionInLoop(const ConnectionPtr& conn){
         // 在此之前需移除Channel
         conn->getChannel()->remove();
     });
+    std::cout << "EventLoop " << this << " current connections (" << connections_.size() << "): [ ";
+    for (const auto& pair : connections_) {
+        std::cout << pair.first << " ";
+    }
+LOG_INFO << "EventLoop " << this << " remove connection fd=" << fd;
+    std::cout << "]" << std::endl;
 }
 
 void EventLoop::addConnection(int fd, ConnectionPtr conn){
     assertInLoopThread();
     connections_[fd] = conn;
+    LOG_INFO << "EventLoop " << this << " added connection fd=" << fd;
 }

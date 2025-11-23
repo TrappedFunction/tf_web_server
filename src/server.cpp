@@ -48,7 +48,7 @@ void Server::handleConnection(){
         socklen_t addr_len = sizeof(peer_addr);
         int connfd = listen_socket_->accept(&peer_addr, &addr_len);
         if(connfd >= 0){
-            std::cout << "Accepted new connection from client, fd=" << connfd << std::endl;
+            // std::cout << "Accepted new connection from client, fd=" << connfd << std::endl;
 
             // 从线程池中获取一个I/O loop
             EventLoop* io_loop = thread_pool_->getNextLoop();
@@ -102,13 +102,13 @@ void Server::handleConnection(){
 // 当新连接建立或断开时调用
 void Server::onConnection(const ConnectionPtr& conn){
     // 根据连接状态进行判断
-    std::cout << "New connection from [" << conn->getPeerAddrStr() << "]" << std::endl;
+    std::cout << "New connection from [" << conn->getPeerAddrStr() << "]" << ": fd = " << conn->getFd() << std::endl;
     // 为新连接设置初始的超时定时器
     std::weak_ptr<Connection> weak_conn = conn;
     TimerId timer_id = conn->getLoop()->runAfter(kIdleConnectionTimeout, [weak_conn](){
         std::shared_ptr<Connection> conn_ptr = weak_conn.lock();
         if(conn_ptr){
-            std::cout << "Connection from [" << conn_ptr->getPeerAddrStr() << "] timed out, closing." << std::endl;
+            std::cout << "Connection from [" << conn_ptr->getPeerAddrStr() << "] timed out, closing." << ": fd = " << conn_ptr->getFd() << std::endl;
             conn_ptr->forceClose(); 
         }
     });

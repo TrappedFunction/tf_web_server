@@ -75,18 +75,24 @@ void Connection::handleHandShake(){
 
     }else{
         int err = SSL_get_error(ssl_.get(), ret);
-        if(err == SSL_ERROR_WANT_READ){
-            // 需要更多数据才能继续握手，保持监听读事件
-            channel_->enableReading();
-            if(channel_->isWriting()) channel_->disableWriting();
-        }else if(err == SSL_ERROR_WANT_WRITE){
-            // 需要发送数据才能继续握手，监听写事件
-            channel_->enableWriting();
-            if(channel_->isReading()) channel_->disableReading();
-        }else{
-            // 握手失败
-            LOG_ERROR << "SSL Handshake failed, fd=" << socket_->getFd();
-            handleError();
+        if (err == SSL_ERROR_WANT_READ) {
+            // 关键：必须确保我们正在监听读事件
+            if (!channel_->isReading()) channel_->enableReading();
+            // 握手期间通常不需要监听写，除非 WANT_WRITE
+            if (channel_->isWriting()) channel_->disableWriting();
+        } else if (err == SSL_ERROR_WANT_WRITE) {
+            // 关键：必须监听写事件
+            if (!channel_->isWriting()) channel_->enableWriting();
+            if (channel_->isReading()) channel_->disableReading();
+        } else {
+            // **失败处理**
+            // 打印详细错误日志
+            char err_buf[256];
+            ERR_error_string_n(ERR_get_error(), err_buf, sizeof(err_buf));
+            LOG_ERROR << "SSL Handshake failed, fd=" << socket_->getFd() 
+                      << ", SSL err=" << err << ", Detail: " << err_buf;
+            
+            handleError(); // 这会调用 handleClose
         }
     }
 }
@@ -182,10 +188,11 @@ void Connection::handleRead() {
                 if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
                     break; 
                 } else if (err == SSL_ERROR_ZERO_RETURN) {
-                    // **核心修正**: 收到 TLS Close Notify，只表示对端结束发送。
-                    // 在 Keep-Alive 模式下，我们不应立即关闭连接，而是等待逻辑层处理。
-                    // 如果逻辑层解析完请求后决定关闭，它会调用 shutdown。
-                    // 这里我们只退出循环，视为“没有更多数据”。
+                    // 收到 TLS 关闭通知
+                    // 如果此时 buffer 里没有待处理数据，说明是空闲连接关闭，或者请求发送完毕后的关闭
+                    if (input_buffer_.readableBytes() == 0) {
+                        handleClose();
+                    }
                     break; 
                 } else if (err == SSL_ERROR_SYSCALL) {
                     // 系统错误，通常意味着连接重置或非正常断开
@@ -315,20 +322,12 @@ void Connection::handleClose(){
     if(state_ != kDisconnected){
         setState(kDisconnected);
         channel_->disableAll();
-        ConnectionPtr guard_this(shared_from_this());
-        // 仍然需要通知上层连接已关闭
-        std::cout << "Connection from [" << getPeerAddrStr() << "] is closing." << std::endl;
-        // 关闭连接时，取消与之关联的定时器
         TimerId id = getTimerId();
-        if (!id.expired()) {
-            loop_->cancel(id);
-        }
+        if (!id.expired()) loop_->cancel(id);
+        ConnectionPtr guard_this(shared_from_this());
 
         close_callback_(guard_this);
-        // loop_->removeChannel(channel_.get());
     }
-    
-    // std::cout << "Client fd=" << socket_->getFd() << "closed connection." << std::endl;
 }
 
 void Connection::handleError(){

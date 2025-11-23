@@ -70,7 +70,7 @@ void onMessage(const std::shared_ptr<Connection>& conn, Buffer* buf){
                     std::shared_ptr<Connection> conn_ptr = weak_conn.lock();
                     if(conn_ptr){
                         // 如果超时，服务器主动关闭连接
-                        std::cout << "Connection from [" << conn_ptr->getPeerAddrStr() << "] timed out, closing." << std::endl;
+                        std::cout << "Connection from [" << conn_ptr->getPeerAddrStr() << "] timed out, closing." << ": fd = " << conn_ptr->getFd() << std::endl;
                         conn_ptr->forceClose(); 
                     }
                 });
@@ -193,6 +193,11 @@ int main(int argc, char* argv[]){
                 }
             }
         }
+        g_router.addRoute(HttpRequest::GET, "/.well-known/appspecific/com.chrome.devtools.json", 
+        [](const HttpRequest&, HttpResponse* resp){
+            resp->setStatusCode(HttpResponse::k404NotFound);
+            resp->setContentLength(0);
+        });
 
 
 
