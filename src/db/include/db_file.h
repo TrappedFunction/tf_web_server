@@ -24,6 +24,9 @@ public:
 
     // 获取当前写偏移量（文件大小）
     uint64_t GetWriteOffset() const { return write_off_; }
+    
+    // 用于启动恢复时修正偏移量
+    void SetWriteOffset(uint64_t offset) { write_off_ = offset; }
 
     // 强制刷盘
     bool Sync();

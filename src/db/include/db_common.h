@@ -9,7 +9,7 @@ namespace TFDB {
 // 操作类型：目前为Append-Only，删除是写入的一种(写入一个墓碑标记)
 enum LogRecordType : char {
     LOG_RECORD_NORMAL = 1, // 正常数据
-    LOG_RECODE_DELETED = 2 // 删除标记
+    LOG_RECORD_DELETED = 2 // 删除标记
 };
 
 // 内存中的日志记录对象
