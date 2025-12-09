@@ -3,6 +3,7 @@
 #include "http_request.h"
 #include "utils/logger.h"
 #include "utils/json.hpp" // 引入 json 库
+#include "db_engine.h" // 引入数据库引擎
 #include <fstream>
 #include <vector>
 #include <mutex>
@@ -11,44 +12,11 @@
 
 using json = nlohmann::json;
 extern std::string project_root_path; // 从 main.cpp 引入
+extern std::unique_ptr<TFDB::Engine> g_db; // 引入 main.cpp 中定义的全局数据库实例
 std::string data_path = "/data/";
 std::mutex data_mutex; // 简单的文件读写锁
 
 namespace Handlers {
-
-// 辅助函数：读取 JSON 文件
-json readJsonFile(const std::string& filename) {
-    std::lock_guard<std::mutex> lock(data_mutex);
-    // 确保路径分隔符正确，Windows下可能需要调整
-    std::string full_path = project_root_path + data_path + filename;
-    std::ifstream f(full_path);
-    if (!f.is_open()) {
-        LOG_WARN << "Cannot open file: " << full_path << ", creating new array.";
-        return json::array();
-    }
-    json j;
-    try {
-        // 如果文件为空，json 解析会抛出异常，所以要处理
-        if (f.peek() == std::ifstream::traits_type::eof()) return json::array();
-        f >> j;
-    } catch (const json::parse_error& e) {
-        LOG_ERROR << "JSON parse error in " << filename << ": " << e.what();
-        return json::array();
-    }
-    return j;
-}
-
-// 辅助函数：写入 JSON 文件
-void writeJsonFile(const std::string& filename, const json& data) {
-    std::lock_guard<std::mutex> lock(data_mutex);
-    std::string full_path = project_root_path + data_path + filename;
-    std::ofstream f(full_path);
-    if (f.is_open()) {
-        f << data.dump(4);
-    } else {
-        LOG_ERROR << "Failed to write to file: " << full_path;
-    }
-}
 
 // 辅助函数：解析查询字符串为 map
 std::map<std::string, std::string> parseQueryString(const std::string& query) {
@@ -69,70 +37,146 @@ std::map<std::string, std::string> parseQueryString(const std::string& query) {
     return params;
 }
 
+// 辅助函数：去除字符串首尾空白
+std::string trimString(const std::string& str) {
+    const std::string whitespace = " \t\n\r\f\v";
+    size_t first = str.find_first_not_of(whitespace);
+    if (first == std::string::npos) return "";
+    size_t last = str.find_last_not_of(whitespace);
+    return str.substr(first, (last - first + 1));
+}
+
+// 分割函数：支持英文逗号 ',' 和中文逗号 "，"
+std::vector<std::string> splitAndTrim(const std::string& str) {
+    std::vector<std::string> tokens;
+    std::string current_token;
+    
+    for (size_t i = 0; i < str.length(); ) {
+        // 检查英文逗号 (1 byte)
+        if (str[i] == ',') {
+            if (!trimString(current_token).empty()) {
+                tokens.push_back(trimString(current_token));
+            }
+            current_token.clear();
+            i++;
+        }
+        // 检查中文逗号 (UTF-8: 0xEF 0xBC 0x8C, 3 bytes)
+        else if (i + 2 < str.length() && 
+                 (unsigned char)str[i] == 0xEF && 
+                 (unsigned char)str[i+1] == 0xBC && 
+                 (unsigned char)str[i+2] == 0x8C) {
+            if (!trimString(current_token).empty()) {
+                tokens.push_back(trimString(current_token));
+            }
+            current_token.clear();
+            i += 3; // 跳过3个字节
+        }
+        else {
+            current_token += str[i];
+            i++;
+        }
+    }
+    
+    // 处理最后一个 token
+    if (!trimString(current_token).empty()) {
+        tokens.push_back(trimString(current_token));
+    }
+    
+    return tokens;
+}
+
 // API: 获取所有题目列表 (支持搜索)
 // GET /api/problems?search=keyword
 void handleGetProblems(const HttpRequest& req, HttpResponse* resp) {
-    json problems = readJsonFile("problems.json");
-    json favorites = readJsonFile("favorites.json"); // 读取收藏夹数据
+    // 1. 获取所有题目 ID 列表
+    std::string ids_json_str;
+    json id_list = json::array();
     
-    // 1. 解析参数
+    // 读取索引 Key "sys:problem_ids"
+    if (g_db->Get("sys:problem_ids", &ids_json_str) == TFDB::kSuccess) {
+        try {
+            id_list = json::parse(ids_json_str);
+        } catch (...) {
+            LOG_ERROR << "Failed to parse sys:problem_ids";
+        }
+    }
+
+    // 2. 解析查询参数
     auto queryParams = parseQueryString(req.getQuery());
     std::string search_term = queryParams["search"];
-    std::string tag_filter = queryParams["tag"]; // 获取 tag 参数
-    int limit = queryParams.count("limit") ? std::stoi(queryParams["limit"]) : 20; // 默认每次加载20条
-    int offset = queryParams.count("offset") ? std::stoi(queryParams["offset"]) : 0;
+    std::string tag_filter = queryParams["tag"];
     int filter_fav_id = -1;
     if (queryParams.count("fav_id") && !queryParams["fav_id"].empty()) {
         filter_fav_id = std::stoi(queryParams["fav_id"]);
     }
-    // 如果指定了收藏夹过滤，先获取该收藏夹包含的题目ID集合
+    int limit = queryParams.count("limit") ? std::stoi(queryParams["limit"]) : 20;
+    int offset = queryParams.count("offset") ? std::stoi(queryParams["offset"]) : 0;
+
+    // 3. 准备收藏夹过滤数据
     std::set<int> fav_problem_ids;
     if (filter_fav_id != -1) {
-        for (const auto& f : favorites) {
-            if (f.value("id", 0) == filter_fav_id) {
-                for (auto pid : f["problem_ids"]) fav_problem_ids.insert(pid.get<int>());
-                break;
-            }
-        }
-    }
-    // 预处理：构建一个 map，记录每个题目ID被哪些收藏夹收藏了
-    std::map<int, bool> is_fav_map;
-    for (const auto& f : favorites) {
-        for (auto pid : f["problem_ids"]) {
-            is_fav_map[pid.get<int>()] = true;
+        // 读取指定的收藏夹
+        std::string fav_key = "fav:" + std::to_string(filter_fav_id);
+        std::string fav_val;
+        if (g_db->Get(fav_key, &fav_val) == TFDB::kSuccess) {
+            json f = json::parse(fav_val);
+            for (auto pid : f["problem_ids"]) fav_problem_ids.insert(pid.get<int>());
         }
     }
 
-    // 2. 过滤 (搜索)
-    json filtered_problems = json::array();
+    // 4. 准备 "是否收藏" 的 Map (逻辑优化：只读取需要的)
+    // 为了性能，我们可能不想在这里遍历所有收藏夹来构建 map。
+    // 但为了保持功能一致，我们先用简单方法：读取所有收藏夹 ID，然后查内容。
+    // TODO(这部分在读多写少的场景下，性能还是可以接受的，后续可以优化为反向索引)
+    std::string fav_ids_str;
+    std::map<int, bool> is_fav_map;
+    if (g_db->Get("sys:fav_ids", &fav_ids_str) == TFDB::kSuccess) {
+        json fav_ids = json::parse(fav_ids_str);
+        for (auto fid : fav_ids) {
+            std::string fkey = "fav:" + std::to_string(fid.get<int>());
+            std::string fval;
+            if (g_db->Get(fkey, &fval) == TFDB::kSuccess) {
+                json f = json::parse(fval);
+                for (auto pid : f["problem_ids"]) is_fav_map[pid.get<int>()] = true;
+            }
+        }
+    }
+
+    // 5. 遍历 ID，查库并过滤
+    json filtered = json::array();
     
-    // 判断搜索词是否纯数字（用于ID搜索）
-    bool is_id_search = !search_term.empty() && 
-                        std::all_of(search_term.begin(), search_term.end(), ::isdigit);
+    // 搜索 ID 逻辑
+    bool is_id_search = !search_term.empty() && std::all_of(search_term.begin(), search_term.end(), ::isdigit);
     int search_id = is_id_search ? std::stoi(search_term) : -1;
 
-    for (const auto& p : problems) {
-        int pid = p.value("id", 0);
+    // 注意：id_list 中的顺序可能不是有序的（取决于插入顺序），如果需要排序可以在这里 sort
+    // std::sort(id_list.begin(), id_list.end()); 
+
+    for (auto& id_val : id_list) {
+        int pid = id_val.get<int>();
+        
+        // 5.1 收藏夹 ID 过滤 (快速过滤，无需查 DB)
+        if (filter_fav_id != -1) {
+            if (fav_problem_ids.find(pid) == fav_problem_ids.end()) continue;
+        }
+        // 5.2 搜索 ID 过滤 (快速过滤)
+        if (is_id_search && pid != search_id) continue;
+
+        // 5.3 查题目详情
+        std::string p_key = "problem:" + std::to_string(pid);
+        std::string p_val;
+        if (g_db->Get(p_key, &p_val) != TFDB::kSuccess) continue; // 数据不一致？跳过
+
+        json p = json::parse(p_val);
         bool match = true;
 
-        // 1. 收藏夹过滤
-        if (filter_fav_id != -1) {
-            if (fav_problem_ids.find(pid) == fav_problem_ids.end()) match = false;
+        // 5.4 文本搜索过滤
+        if (!search_term.empty() && !is_id_search) {
+            std::string title = p.value("title", "");
+            if (title.find(search_term) == std::string::npos) match = false;
         }
 
-        if (!search_term.empty()) {
-            if (is_id_search) {
-                // 按 ID 精确匹配
-                if (p.value("id", 0) != search_id) match = false;
-            } else {
-                // 按标题模糊匹配
-                std::string title = p.value("title", "");
-                // 简单的大小写不敏感处理（可选）
-                if (title.find(search_term) == std::string::npos) match = false;
-            }
-        }
-
-        // **标签过滤**
+        // 5.5 标签过滤
         if (match && !tag_filter.empty()) {
             bool tag_found = false;
             if (p.contains("tags") && p["tags"].is_array()) {
@@ -146,30 +190,31 @@ void handleGetProblems(const HttpRequest& req, HttpResponse* resp) {
         }
 
         if (match) {
-            filtered_problems.push_back({
-                {"id", p.value("id", 0)},
+            filtered.push_back({
+                {"id", pid},
                 {"title", p.value("title", "无标题")},
                 {"difficulty", p.value("difficulty", "Easy")},
-                {"algorithm", p.value("algorithm", "")}, // 列表页可能需要显示算法标签
+                {"algorithm", p.value("algorithm", "")},
                 {"tags", p.value("tags", json::array())},
-                {"is_favorited", is_fav_map[pid]} 
+                {"is_favorited", is_fav_map[pid]}
             });
         }
     }
 
-    // 3. 分页 (Slice)
+    // 6. 分页 (逻辑不变)
     json paged_result = json::array();
-    int total_size = filtered_problems.size();
-    
+    int total_size = filtered.size();
     if (offset < total_size) {
         int end = std::min(offset + limit, total_size);
         for (int i = offset; i < end; ++i) {
-            paged_result.push_back(filtered_problems[i]);
+            paged_result.push_back(filtered[i]);
         }
     }
 
-    // 返回结果，包含总数以便前端判断是否还有更多
-    json response_data = {{"total", filtered_problems.size()}, {"data", paged_result}};
+    json response_data = {
+        {"total", total_size},
+        {"data", paged_result}
+    };
 
     resp->setStatusCode(HttpResponse::k200Ok);
     resp->setContentType("application/json; charset=utf-8");
@@ -180,25 +225,31 @@ void handleGetProblems(const HttpRequest& req, HttpResponse* resp) {
 // 2. 新增 API: 获取所有可用标签
 // GET /api/tags
 void handleGetAllTags(const HttpRequest& req, HttpResponse* resp) {
-    json problems = readJsonFile("problems.json");
     std::set<std::string> unique_tags;
-
-    // 遍历所有题目，收集标签
-    for (const auto& p : problems) {
-        if (p.contains("tags") && p["tags"].is_array()) {
-            for (const auto& t : p["tags"]) {
-                if (t.is_string()) {
-                    unique_tags.insert(t.get<std::string>());
+    
+    // 1. 获取所有题目 ID
+    std::string ids_json_str;
+    if (g_db->Get("sys:problem_ids", &ids_json_str) == TFDB::kSuccess) {
+        json id_list = json::parse(ids_json_str);
+        
+        // 2. 遍历题目
+        for (auto& id_val : id_list) {
+            std::string key = "problem:" + std::to_string(id_val.get<int>());
+            std::string val;
+            if (g_db->Get(key, &val) == TFDB::kSuccess) {
+                json p = json::parse(val);
+                // 3. 收集标签
+                if (p.contains("tags") && p["tags"].is_array()) {
+                    for (const auto& t : p["tags"]) {
+                        unique_tags.insert(t.get<std::string>());
+                    }
                 }
             }
         }
     }
 
-    // 转换为 JSON 数组
     json tags_array = json::array();
-    for (const auto& t : unique_tags) {
-        tags_array.push_back(t);
-    }
+    for (const auto& t : unique_tags) tags_array.push_back(t);
     
     resp->setStatusCode(HttpResponse::k200Ok);
     resp->setContentType("application/json; charset=utf-8");
@@ -207,16 +258,31 @@ void handleGetAllTags(const HttpRequest& req, HttpResponse* resp) {
 }
 
 // 3. 新增 API: 收藏夹相关
-
 // 获取所有收藏夹
 // GET /api/favorites
 void handleGetFavorites(const HttpRequest& req, HttpResponse* resp) {
-    json favs = readJsonFile("favorites.json");
-    
-    // 如果文件不存在或为空，readJsonFile 会返回空数组，这也是合法的
+    std::string ids_json_str;
+    json result = json::array();
+
+    // 1. 获取收藏夹 ID 列表
+    if (g_db->Get("sys:fav_ids", &ids_json_str) == TFDB::kSuccess) {
+        json id_list = json::parse(ids_json_str);
+        
+        // 2. 遍历 ID 获取详情
+        for (auto& id_val : id_list) {
+            int fid = id_val.get<int>();
+            std::string key = "fav:" + std::to_string(fid);
+            std::string val;
+            if (g_db->Get(key, &val) == TFDB::kSuccess) {
+                // 直接把存的 JSON 对象放进结果数组
+                result.push_back(json::parse(val));
+            }
+        }
+    }
+
     resp->setStatusCode(HttpResponse::k200Ok);
     resp->setContentType("application/json; charset=utf-8");
-    resp->setBody(favs.dump());
+    resp->setBody(result.dump());
     resp->setContentLength(resp->getBody().length());
 }
 
@@ -231,28 +297,29 @@ void handleCreateFavorite(const HttpRequest& req, HttpResponse* resp) {
         resp->setContentLength(resp->getBody().length());
         return;
     }
-    
-    json favs = readJsonFile("favorites.json");
-    
-    // 生成新 ID
+    std::lock_guard<std::mutex> lock(data_mutex);
+    // 1. 生成 ID
+    std::string max_id_str;
     int new_id = 1;
-    if (!favs.empty()) {
-        for (const auto& f : favs) {
-            if (f.contains("id") && f["id"].is_number()) {
-                new_id = std::max(new_id, f["id"].get<int>() + 1);
-            }
-        }
+    if (g_db->Get("sys:next_fav_id", &max_id_str) == TFDB::kSuccess) {
+        new_id = std::stoi(max_id_str) + 1;
     }
-    
-    // 构造新收藏夹对象
-    json new_fav = {
-        {"id", new_id},
-        {"name", name},
-        {"problem_ids", json::array()} // 初始为空数组
-    };
-    
-    favs.push_back(new_fav);
-    writeJsonFile("favorites.json", favs);
+    g_db->Put("sys:next_fav_id", std::to_string(new_id));
+
+    // 2. 存入数据
+    json new_fav = { {"id", new_id}, {"name", name}, {"problem_ids", json::array()} };
+    g_db->Put("fav:" + std::to_string(new_id), new_fav.dump());
+
+    // 3. 更新索引
+    std::string ids_str;
+    json id_list;
+    if (g_db->Get("sys:fav_ids", &ids_str) == TFDB::kSuccess) {
+        id_list = json::parse(ids_str);
+    } else {
+        id_list = json::array();
+    }
+    id_list.push_back(new_id);
+    g_db->Put("sys:fav_ids", id_list.dump());
     
     LOG_INFO << "Created favorite list ID: " << new_id << ", Name: " << name;
     
@@ -270,50 +337,55 @@ void handleAddToFavorite(const HttpRequest& req, HttpResponse* resp) {
 
     if (fav_id_str.empty() || prob_id_str.empty()) {
         resp->setStatusCode(HttpResponse::k400BadRequest);
+        resp->setBody("Missing fav_id or problem_id");
         return;
     }
 
     int fav_id = std::stoi(fav_id_str);
     int prob_id = std::stoi(prob_id_str);
-    
-    json favs = readJsonFile("favorites.json");
-    bool found = false;
+    std::string key = "fav:" + fav_id_str;
 
-    for (auto& f : favs) {
-        if (f.value("id", 0) == fav_id) {
-            // 检查该题目是否已经在收藏夹中
-            bool exists = false;
-            if (f.contains("problem_ids") && f["problem_ids"].is_array()) {
-                for (auto pid : f["problem_ids"]) {
-                    if (pid == prob_id) {
-                        exists = true;
-                        break;
-                    }
-                }
-            } else {
-                // 如果字段不存在或不是数组，初始化它
+    // 加锁，保护读-改-写过程
+    std::lock_guard<std::mutex> lock(data_mutex);
+
+    std::string val;
+    if (g_db->Get(key, &val) == TFDB::kSuccess) {
+        try {
+            json f = json::parse(val);
+            
+            // 确保 problem_ids 字段存在且是数组
+            if (!f.contains("problem_ids") || !f["problem_ids"].is_array()) {
                 f["problem_ids"] = json::array();
             }
-            
+
+            // 检查去重
+            bool exists = false;
+            for (const auto& pid : f["problem_ids"]) {
+                if (pid.get<int>() == prob_id) {
+                    exists = true;
+                    break;
+                }
+            }
+
             if (!exists) {
                 f["problem_ids"].push_back(prob_id);
-                found = true;
+                // 写回数据库
+                g_db->Put(key, f.dump());
+                LOG_INFO << "Added problem " << prob_id << " to favorite " << fav_id;
             } else {
-                // 如果已经存在，我们也视为成功，但不重复添加
-                found = true; 
                 LOG_INFO << "Problem " << prob_id << " already in favorite " << fav_id;
             }
-            break;
+
+            resp->setStatusCode(HttpResponse::k200Ok);
+            resp->setBody("{\"status\": \"success\"}");
+            resp->setContentType("application/json");
+
+        } catch (const std::exception& e) {
+            LOG_ERROR << "JSON parse error in handleAddToFavorite: " << e.what();
+            resp->setStatusCode(HttpResponse::k500InternalServerError);
         }
-    }
-    
-    if (found) {
-        writeJsonFile("favorites.json", favs);
-        resp->setStatusCode(HttpResponse::k200Ok);
-        resp->setContentType("application/json");
-        resp->setBody("{\"status\": \"success\"}");
     } else {
-        resp->setStatusCode(HttpResponse::k404NotFound); // 收藏夹不存在
+        resp->setStatusCode(HttpResponse::k404NotFound);
         resp->setBody("{\"error\": \"Favorite list not found\"}");
         resp->setContentType("application/json");
     }
@@ -330,53 +402,83 @@ void handleRemoveFromFavorite(const HttpRequest& req, HttpResponse* resp) {
         return;
     }
     int prob_id = std::stoi(prob_id_str);
-    
-    // 获取 fav_id 参数，默认为 -1 (移除所有)
+
     std::string fav_id_str = req.getPostValue("fav_id");
     int target_fav_id = fav_id_str.empty() ? -1 : std::stoi(fav_id_str);
-    
-    json favs = readJsonFile("favorites.json");
-    bool changed = false;
 
-    // 使用迭代器遍历，以便安全删除收藏夹
-    for (auto fav_it = favs.begin(); fav_it != favs.end(); ) {
-        int current_fav_id = fav_it->value("id", 0);
-        bool modified_this_fav = false;
+    std::lock_guard<std::mutex> lock(data_mutex);
 
-        if (target_fav_id == -1 || target_fav_id == current_fav_id) {
-            if (fav_it->contains("problem_ids") && (*fav_it)["problem_ids"].is_array()) {
-                auto& ids = (*fav_it)["problem_ids"];
-                auto it = std::remove_if(ids.begin(), ids.end(), 
-                    [prob_id](const json& j){ return j.get<int>() == prob_id; });
-                
-                if (it != ids.end()) {
-                    ids.erase(it, ids.end());
-                    changed = true;
-                    modified_this_fav = true;
-                }
-            }
-        }
+    // 1. 获取所有收藏夹 ID 列表 (因为可能需要遍历所有收藏夹)
+    std::string ids_str;
+    if (g_db->Get("sys:fav_ids", &ids_str) != TFDB::kSuccess) {
+        // 如果连索引都没有，那就什么都不用做
+        resp->setStatusCode(HttpResponse::k200Ok);
+        resp->setBody("{\"status\": \"not_found\"}");
+        return;
+    }
 
-        // **新增：检查是否为空**
-        // 只有当这个收藏夹被修改过，且变为空时才删除
-        // 或者你可以设定更激进的策略：任何时候遇到空的都删掉
-        if (modified_this_fav && (*fav_it)["problem_ids"].empty()) {
-            fav_it = favs.erase(fav_it);
-            changed = true;
+    json fav_ids_list = json::parse(ids_str);
+    bool global_list_changed = false;
+    bool any_removed = false;
+
+    // 2. 遍历所有收藏夹
+    // 使用迭代器以便安全删除
+    for (auto it = fav_ids_list.begin(); it != fav_ids_list.end(); ) {
+        int fid = it->get<int>();
+        
+        // 过滤：如果指定了 target_fav_id，只处理这一个
+        if (target_fav_id != -1 && target_fav_id != fid) {
+            ++it;
             continue;
         }
 
-        ++fav_it;
+        std::string key = "fav:" + std::to_string(fid);
+        std::string val;
+        
+        if (g_db->Get(key, &val) == TFDB::kSuccess) {
+            json f = json::parse(val);
+            
+            if (f.contains("problem_ids") && f["problem_ids"].is_array()) {
+                auto& p_ids = f["problem_ids"];
+                
+                // 从数组中移除题目 ID
+                auto original_size = p_ids.size();
+                auto pit = std::remove(p_ids.begin(), p_ids.end(), prob_id);
+                
+                if (pit != p_ids.end()) {
+                    p_ids.erase(pit, p_ids.end()); // 真正删除
+                    any_removed = true;
+                    
+                    // **关键：检查是否为空**
+                    if (p_ids.empty()) {
+                        LOG_INFO << "Favorite list " << fid << " became empty, deleting it.";
+                        // 1. 删除收藏夹数据
+                        g_db->Delete(key);
+                        // 2. 从 ID 列表中移除该收藏夹
+                        it = fav_ids_list.erase(it); 
+                        global_list_changed = true;
+                        continue; // 跳过 ++it，因为 erase 返回了下一个有效迭代器
+                    } else {
+                        // 收藏夹不为空，更新数据
+                        g_db->Put(key, f.dump());
+                    }
+                }
+            }
+        }
+        ++it;
     }
-    
-    if (changed) {
-        writeJsonFile("favorites.json", favs);
+
+    // 3. 如果删除了收藏夹，更新全局索引
+    if (global_list_changed) {
+        g_db->Put("sys:fav_ids", fav_ids_list.dump());
+    }
+
+    if (any_removed) {
         resp->setStatusCode(HttpResponse::k200Ok);
-        resp->setBody("{\"status\":\"removed\"}");
+        resp->setBody("{\"status\": \"removed\"}");
     } else {
-        // 即使没找到也返回成功，但在 body 里说明
         resp->setStatusCode(HttpResponse::k200Ok);
-        resp->setBody("{\"status\":\"not_found\"}");
+        resp->setBody("{\"status\": \"not_found\"}");
     }
     resp->setContentType("application/json");
     resp->setContentLength(resp->getBody().length());
@@ -390,40 +492,23 @@ void handleGetProblemDetail(const HttpRequest& req, HttpResponse* resp) {
         LOG_ERROR << "No route params found for detail request";
         resp->setStatusCode(HttpResponse::k400BadRequest); return;
     }
-    // 打印调试日志
-    LOG_INFO << "Looking for problem ID: " << params[0];
-    int id = 0;
-    try {
-        id = std::stoi(params[0]);
-    } catch (...) {
-        LOG_ERROR << "Invalid ID format: " << params[0];
-        resp->setStatusCode(HttpResponse::k400BadRequest);
-        return;
-    }
+    std::string id_str = params[0];
     
-    json problems = readJsonFile("problems.json");
-    bool found = false;
-    for (const auto& p : problems) {
-        // 更加健壮的比较：同时尝试 int 和 string
-        int current_id = -1;
-        if (p["id"].is_number()) {
-            current_id = p["id"].get<int>();
-        } else if (p["id"].is_string()) {
-            try { current_id = std::stoi(p["id"].get<std::string>()); } catch(...) {}
-        }
+    // 构造 Key
+    std::string key = "problem:" + id_str;
+    std::string value;
 
-        if (current_id == id) {
-            resp->setStatusCode(HttpResponse::k200Ok);
-            resp->setContentType("application/json; charset=utf-8");
-            resp->setBody(p.dump());
-            resp->setContentLength(resp->getBody().length());
-            found = true;
-            break;
-        }
-    }
-    
-    if (!found) {
-        LOG_WARN << "Problem ID " << id << " not found in database.";
+    // 查库
+    TFDB::Status s = g_db->Get(key, &value);
+
+    if (s == TFDB::kSuccess) {
+        resp->setStatusCode(HttpResponse::k200Ok);
+        resp->setContentType("application/json; charset=utf-8");
+        // value 本身就是存储进去的 JSON 字符串，直接返回即可
+        resp->setBody(value);
+        resp->setContentLength(resp->getBody().length());
+    } else {
+        // kKeyNotFound
         resp->setStatusCode(HttpResponse::k404NotFound);
         resp->setBody("{}");
         resp->setContentLength(2);
@@ -451,40 +536,56 @@ void handleAddProblem(const HttpRequest& req, HttpResponse* resp) {
         return;
     }
 
-    json problems = readJsonFile("problems.json");
-    // 生成新 ID
-    int new_id = 1;
-    if (!problems.empty()) {
-        // 找到最大的 ID + 1，防止删除后的 ID 冲突
-        for (const auto& p : problems) {
-            if (p.contains("id") && p["id"].is_number()) {
-                new_id = std::max(new_id, p["id"].get<int>() + 1);
-            }
-        }
-    }
-
     // 构建 tags 数组
     json tags = json::array();
     tags.push_back("New"); // 默认标签
     if (!algo.empty()) {
-        tags.push_back(algo); // **自动添加算法类型为标签**
+        std::vector<std::string> algos = splitAndTrim(algo);
+        for (const auto& a : algos) {
+            tags.push_back(a);
+        }
     }
-    
-    json new_problem = {
-        {"id", new_id},
-        {"title", title},
-        {"difficulty", difficulty},
-        {"description", desc},
-        {"algorithm", algo},
-        {"solution_idea", idea},
-        {"time_complexity", time},
-        {"space_complexity", space},
-        {"code", code},
-        {"tags", tags} // TODO暂时写死
-    };
-    
-    problems.push_back(new_problem);
-    writeJsonFile("problems.json", problems);
+
+    {
+        std::lock_guard<std::mutex> lock(data_mutex); // 加锁
+
+        // 2. 生成新 ID
+        // 读取 sys:next_problem_id，自增并写回
+        std::string max_id_str;
+        int new_id = 1;
+        if (g_db->Get("sys:next_problem_id", &max_id_str) == TFDB::kSuccess) {
+            new_id = std::stoi(max_id_str) + 1;
+        }
+        g_db->Put("sys:next_problem_id", std::to_string(new_id));
+
+        // 3. 构造并写入题目数据
+        json new_problem = {
+            {"id", new_id},
+            {"title", title},
+            {"difficulty", difficulty},
+            {"description", desc},
+            {"algorithm", algo},
+            {"solution_idea", idea},
+            {"time_complexity", time},
+            {"space_complexity", space},
+            {"code", code},
+            {"tags", tags} 
+        };
+        g_db->Put("problem:" + std::to_string(new_id), new_problem.dump());
+
+        // 4. 更新 ID 索引列表
+        std::string ids_str;
+        json id_list;
+        if (g_db->Get("sys:problem_ids", &ids_str) == TFDB::kSuccess) {
+            id_list = json::parse(ids_str);
+        } else {
+            id_list = json::array();
+        }
+        id_list.push_back(new_id);
+        g_db->Put("sys:problem_ids", id_list.dump());
+        
+        LOG_INFO << "Added problem ID: " << new_id;
+    } // 解锁
 
     // 返回 302 重定向
     resp->setStatusCode(HttpResponse::k302Found);
@@ -500,44 +601,62 @@ void handleDeleteProblem(const HttpRequest& req, HttpResponse* resp) {
         resp->setStatusCode(HttpResponse::k400BadRequest);
         return;
     }
-    
-    json problems = readJsonFile("problems.json");
-    
-    // 使用 remove_if 删除元素
-    auto it = std::remove_if(problems.begin(), problems.end(), 
-        [id](const json& j){ return j.value("id", 0) == id; });
+    std::lock_guard<std::mutex> lock(data_mutex);
         
-    if (it != problems.end()) {
-        problems.erase(it, problems.end());
-        writeJsonFile("problems.json", problems);
-        // 从 favorites.json 中级联删除**
-        json favs = readJsonFile("favorites.json");
-        bool favs_changed = false;
-        // 使用迭代器遍历，因为我们要删除元素
-        for (auto fav_it = favs.begin(); fav_it != favs.end(); ) {
-            if (fav_it->contains("problem_ids") && (*fav_it)["problem_ids"].is_array()) {
-                auto& p_ids = (*fav_it)["problem_ids"];
-                // 从数组中移除该题目ID
-                auto pid_it = std::remove(p_ids.begin(), p_ids.end(), id);
-                
-                if (pid_it != p_ids.end()) {
-                    p_ids.erase(pid_it, p_ids.end());
-                    favs_changed = true;
-                }
-                
-                // **新增：检查收藏夹是否为空，若为空则删除收藏夹**
-                if (p_ids.empty()) {
-                    fav_it = favs.erase(fav_it); // erase 返回下一个有效的迭代器
-                    favs_changed = true;
-                    continue; // 跳过 ++fav_it
-                }
+    // 1. 删除题目数据
+    if (g_db->Delete("problem:" + id_str) == TFDB::kSuccess) {
+        // 2. 从 ID 列表中移除
+        std::string ids_str;
+        if (g_db->Get("sys:problem_ids", &ids_str) == TFDB::kSuccess) {
+            json id_list = json::parse(ids_str);
+            auto it = std::remove(id_list.begin(), id_list.end(), id);
+            if (it != id_list.end()) {
+                id_list.erase(it, id_list.end());
+                g_db->Put("sys:problem_ids", id_list.dump());
             }
-            ++fav_it;
         }
-        if (favs_changed) {
-            writeJsonFile("favorites.json", favs);
-            LOG_INFO << "Cascading delete: updated favorites for problem ID " << id;
+        // 3. 级联删除收藏夹中的引用 (这也是为什么我们需要 sys:fav_ids)
+        std::string fav_ids_str;
+        if (g_db->Get("sys:fav_ids", &fav_ids_str) == TFDB::kSuccess) {
+            json fav_ids = json::parse(fav_ids_str);
+            bool fav_list_changed = false;
+
+            // 遍历所有收藏夹
+            for (auto it = fav_ids.begin(); it != fav_ids.end(); ) {
+                int fid = it->get<int>();
+                std::string fkey = "fav:" + std::to_string(fid);
+                std::string fval;
+                
+                if (g_db->Get(fkey, &fval) == TFDB::kSuccess) {
+                    json f = json::parse(fval);
+                    auto& p_ids = f["problem_ids"];
+                    
+                    // 移除题目ID
+                    auto pit = std::remove(p_ids.begin(), p_ids.end(), id);
+                    if (pit != p_ids.end()) {
+                        p_ids.erase(pit, p_ids.end());
+                        
+                        // 检查是否为空，如果为空则删除该收藏夹
+                        if (p_ids.empty()) {
+                            g_db->Delete(fkey); // 删除收藏夹数据
+                            it = fav_ids.erase(it); // 从列表中移除收藏夹ID
+                            fav_list_changed = true;
+                            continue; // 跳过 ++it
+                        } else {
+                            // 写回更新后的收藏夹
+                            g_db->Put(fkey, f.dump());
+                        }
+                    }
+                }
+                ++it;
+            }
+            
+            // 如果删除了收藏夹，更新 sys:fav_ids
+            if (fav_list_changed) {
+                g_db->Put("sys:fav_ids", fav_ids.dump());
+            }
         }
+
         LOG_INFO << "Deleted problem ID: " << id;
         resp->setStatusCode(HttpResponse::k200Ok);
         resp->setBody("{\"status\": \"deleted\"}");
@@ -552,37 +671,13 @@ void handleDeleteProblem(const HttpRequest& req, HttpResponse* resp) {
 // API: 获取提问箱列表
 // GET /api/questions
 void handleGetQuestions(const HttpRequest& req, HttpResponse* resp) {
-    json questions = readJsonFile("questions.json");
-    resp->setStatusCode(HttpResponse::k200Ok);
-    resp->setContentType("application/json; charset=utf-8");
-    resp->setBody(questions.dump());
-    resp->setContentLength(resp->getBody().length());
+    
 }
 
 // API: 提交问题
 // POST /api/questions
 void handleAddQuestion(const HttpRequest& req, HttpResponse* resp) {
-    std::string content = req.getPostValue("content");
-    if (content.empty()) {
-        resp->setStatusCode(HttpResponse::k400BadRequest); return;
-    }
-
-    json questions = readJsonFile("questions.json");
-    int new_id = questions.empty() ? 1 : questions.back()["id"].get<int>() + 1;
     
-    json new_q = {
-        {"id", new_id},
-        {"content", content},
-        {"status", "Unresolved"}
-        // {"created_at", Timestamp::now().toString()} 
-    };
-    
-    questions.push_back(new_q);
-    writeJsonFile("questions.json", questions);
-
-    resp->setStatusCode(HttpResponse::k200Ok);
-    resp->setBody("{\"status\": \"success\"}");
-    resp->setContentLength(resp->getBody().length());
 }
 
 // API: 修改题目
@@ -606,67 +701,75 @@ void handleUpdateProblem(const HttpRequest& req, HttpResponse* resp) {
     std::string space = req.getPostValue("space_complexity");
     std::string code = req.getPostValue("code");
 
-    json problems = readJsonFile("problems.json");
+    std::string key = "problem:" + id_str;
+    std::string val;
     bool found = false;
 
-    // 遍历查找并更新
-    for (auto& p : problems) {
-        if (p.value("id", 0) == id) {
-            // 1. 获取旧的 algorithm
-            std::string old_algo = p.value("algorithm", "");
+    // 加锁不是必须的，因为只操作单条数据，但为了防止读-改-写竞态，加上更好
+    std::lock_guard<std::mutex> lock(data_mutex);
 
-            // 2. 更新 tags
-            if (p.contains("tags") && p["tags"].is_array()) {
-                // 移除旧的 algo 标签 (如果存在且不为空)
-                if (!old_algo.empty()) {
-                    auto& tags = p["tags"];
-                    auto it = std::find(tags.begin(), tags.end(), old_algo);
-                    if (it != tags.end()) {
-                        tags.erase(it);
-                    }
-                }
-                
-                // 添加新的 algo 标签 (如果不为空且不存在)
-                if (!new_algo.empty()) {
-                    bool exists = false;
-                    for (const auto& t : p["tags"]) {
-                        if (t.get<std::string>() == new_algo) {
-                            exists = true; break;
-                        }
-                    }
-                    if (!exists) {
-                        p["tags"].push_back(new_algo);
-                    }
-                }
-            } else {
-                // 如果 tags 不存在或无效，初始化它
+    if (g_db->Get(key, &val) == TFDB::kSuccess) {
+        json p = json::parse(val);
+        // 1. 获取旧的 algorithm
+        std::string old_algo = p.value("algorithm", "");
+
+        // 2. 如果 algorithm 发生了变化
+        if (old_algo != new_algo) {
+            // 解析旧的和新的算法列表
+            std::vector<std::string> old_algos = splitAndTrim(old_algo);
+            std::vector<std::string> new_algos = splitAndTrim(new_algo);
+            
+            // 确保 tags 字段存在
+            if (!p.contains("tags") || !p["tags"].is_array()) {
                 p["tags"] = json::array();
-                if (!new_algo.empty()) p["tags"].push_back(new_algo);
+            }
+            json& tags = p["tags"];
+
+            // A. 移除旧的：在 old 中但不在 new 中的
+            for (const auto& old_a : old_algos) {
+                // 如果这个旧标签在新列表中不存在，说明它被删除了
+                if (std::find(new_algos.begin(), new_algos.end(), old_a) == new_algos.end()) {
+                    // 从 tags 中移除
+                    // json array 的移除比较麻烦，通常重建或者 remove_if
+                    auto it = std::remove(tags.begin(), tags.end(), old_a);
+                    if (it != tags.end()) tags.erase(it);
+                }
             }
 
-            // 3. 更新其他字段
-            p["title"] = title;
-            p["difficulty"] = difficulty;
-            p["description"] = desc;
-            p["algorithm"] = new_algo; // 更新 algo 字段
-            p["solution_idea"] = idea;
-            p["time_complexity"] = time;
-            p["space_complexity"] = space;
-            p["code"] = code;
-            
-            found = true;
-            break;
+            // B. 添加新的：在 new 中但不在 old 中的（或者直接检查 tags 里有没有）
+            for (const auto& new_a : new_algos) {
+                // 检查 tags 里是否已经有了
+                bool exists = false;
+                for (const auto& t : tags) {
+                    if (t.get<std::string>() == new_a) {
+                        exists = true; break;
+                    }
+                }
+                if (!exists) {
+                    tags.push_back(new_a);
+                }
+            }
         }
-    }
 
-    if (found) {
-        writeJsonFile("problems.json", problems);
+        // 3. 更新其他字段
+        p["title"] = title;
+        p["difficulty"] = difficulty;
+        p["description"] = desc;
+        p["algorithm"] = new_algo; // 更新 algo 字段
+        p["solution_idea"] = idea;
+        p["time_complexity"] = time;
+        p["space_complexity"] = space;
+        p["code"] = code;
+            
+        // 3. 写回数据库
+        g_db->Put(key, p.dump());
         LOG_INFO << "Updated problem ID: " << id;
+
         // 重定向回详情页
         resp->setStatusCode(HttpResponse::k302Found);
         resp->addHeader("Location", "/problem.html?id=" + id_str);
         resp->setContentLength(0);
-    } else {
+    }else {
         resp->setStatusCode(HttpResponse::k404NotFound);
         resp->setBody("Problem not found");
         resp->setContentLength(17);
