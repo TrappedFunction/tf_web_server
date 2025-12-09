@@ -10,6 +10,7 @@
 #include "utils/logger.h"
 #include "http/http_router.h"
 #include "http/handlers.h"
+#include "db_engine.h"
 #include <iostream>
 #include <filesystem>
 #include <fstream>
@@ -21,6 +22,10 @@ std::unique_ptr<AsyncLogging> g_async_log;
 
 // 全局的或由 HttpServer 类持有的 Router 对象
 HttpRouter g_router;
+
+// 全局数据库实例
+// 使用 unique_ptr 管理生命周期，确保程序退出时自动 Close
+std::unique_ptr<TFDB::Engine> g_db;
 
 void asyncOutput(const char* msg, int len) {
     if (g_async_log) {
@@ -147,6 +152,47 @@ int main(int argc, char* argv[]){
         else Logger::setLogLevel(Logger::INFO);
         
         g_async_log->start();
+    }
+
+    // 初始化数据库
+    {
+        // 1. 获取数据库路径配置
+        // 默认放在项目根目录下的 data/tfdb 文件夹
+        std::string db_dir_name = config.getString("database", "path", "data/tfdb");
+        std::string db_path;
+
+        // 处理相对路径/绝对路径
+        if(db_dir_name.front() == '/'){
+            db_path = db_dir_name;
+        }else{
+            db_path = project_root_path + "/" + db_dir_name;
+        }
+
+        LOG_INFO << "Initializing database at: " << db_path;
+
+        // 2. 确保目录存在 (C++17 filesystem)
+        if(!std::filesystem::exists(db_path)){
+            try{
+                std::filesystem::create_directories(db_path);
+                LOG_INFO << "Created database directory.";
+            }catch (const std::filesystem::filesystem_error& e){
+                LOG_FATAL << "Failed to create database directory: " << e.what();
+                return 1;
+            }
+        }
+
+        // 3. 打开数据库引擎
+        try{
+            g_db = TFDB::Engine::Open(db_path);
+            if(!g_db){
+                LOG_FATAL << "TFDB::Engine::Open returned null";
+                return 1;
+            }
+            LOG_INFO << "Database opened successfully.";
+        }catch (const std::exception& e){
+            LOG_FATAL << "Failed to open database." << e.what();
+            return 1;
+        }
     }
 
     try{
