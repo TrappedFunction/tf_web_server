@@ -1,6 +1,6 @@
-sudo apt install openssl
-mkdir build
-cd build
-cmake ..
-make
+sudo apt install openssl  
+mkdir build  
+cd build  
+cmake ..  
+make  
 ./server
