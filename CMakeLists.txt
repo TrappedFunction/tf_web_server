@@ -22,3 +22,18 @@ add_executable(server ${SOURCES})
 target_include_directories(server PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_include_directories(server PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/db/include)
 target_link_libraries(server PRIVATE OpenSSL::SSL OpenSSL::Crypto pthread)
+
+# 迁移工具
+add_executable(migrate_tool src/tools/migrate_data.cpp 
+                            src/db/core/db_engine.cpp
+                            src/db/core/db_file.cpp
+                            src/db/core/db_index.cpp
+                            src/db/core/db_codec.cpp
+                            src/utils/timestamp.cpp
+)
+
+# 包含路径
+target_include_directories(migrate_tool PRIVATE src/db/include include)
+
+# 链接库
+target_link_libraries(migrate_tool pthread)
