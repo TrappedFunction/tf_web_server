@@ -215,7 +215,8 @@ void Engine::LoadIndexFromFile(uint32_t file_id, DBFile* file) {
 Status Engine::Put(const std::string& key, const std::string& value) {
     if (key.empty()) return kInvalid;
 
-    std::lock_guard<std::mutex> lock(mutex_); // 写锁，保护整个写入流程
+    // 在持有此锁期间，没有任何其他线程可以 Read 或 Write
+    std::unique_lock<std::shared_mutex> lcok(rw_mutex_); // 写锁，保护整个写入流程
 
     // 1.1 构造 LogRecord
     LogRecord record;
@@ -225,6 +226,7 @@ Status Engine::Put(const std::string& key, const std::string& value) {
 
     // 1.2 追加写入磁盘
     LogRecordPos pos;
+    // AppendLogRecord 内部操作 active_file_，这是非线程安全的，所以必须在锁内
     if (!AppendLogRecord(record, &pos)) {
         return kIOError;
     }
@@ -240,11 +242,21 @@ Status Engine::Get(const std::string& key, std::string* value) {
 
     // 2.1 查索引 (Indexer 内部有读写锁，这里不需要加 Engine 的锁)
     LogRecordPos pos;
+
+    // Indexer::Get 内部是线程安全的 (使用 shared_lock)，
+    // 但需要保证在查索引和后续读文件期间，文件不会被关闭或删除。
+    // 所以在 Engine 层加一个读锁。
+    std::shared_lock<std::shared_mutex> lock(rw_mutex_);
+
     if (!indexer_->Get(key, &pos)) {
         return kKeyNotFound;
     }
 
     // 2.2 读磁盘
+    // 在持有读锁的情况下进行磁盘 I/O 是安全的，允许其他线程同时进行 Get。
+    // 只要没有线程持有写锁（即没有 Close 或 File Rotate 发生），
+    // active_file_ 和 archived_files_ 的指针就是有效的。
+    // Linux 的 pread 是原子且线程安全的。
     // 注意：ReadLogRecord 可能会抛出异常，这里应该 try-catch
     try {
         LogRecord record = ReadLogRecord(pos);
@@ -266,9 +278,9 @@ Status Engine::Get(const std::string& key, std::string* value) {
 Status Engine::Delete(const std::string& key) {
     if (key.empty()) return kInvalid;
 
-    std::lock_guard<std::mutex> lock(mutex_); // 写锁
+    std::unique_lock<std::shared_mutex> lock(rw_mutex_); // 写锁
 
-    // 3.1 查索引，看 Key 是否存在
+    // 3.1 // 检查 Key 是否存在 (这里虽然 Indexer 内部有锁，但我们在外部加了写锁，所以是安全的)
     LogRecordPos dummy_pos;
     if (!indexer_->Get(key, &dummy_pos)) {
         return kKeyNotFound; // Key 本就不存在
@@ -369,8 +381,8 @@ LogRecord Engine::ReadLogRecord(LogRecordPos pos) {
 }
 
 void Engine::Close() {
-    std::lock_guard<std::mutex> lock(mutex_); // 加锁，防止关闭时还有写入
-    
+    std::unique_lock<std::shared_mutex> lock(rw_mutex_); // 加锁，防止关闭时还有写入
+     
     // 1. 刷盘活跃文件
     if (active_file_) {
         active_file_->Sync(); // 调用 fsync

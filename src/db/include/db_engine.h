@@ -4,6 +4,7 @@
 #include <vector>
 #include <map>
 #include <mutex>
+#include <shared_mutex> // C++17
 #include "db_file.h"
 #include "db_common.h"
 #include "db_index.h"
@@ -62,10 +63,7 @@ private:
     // 内存索引
     std::unique_ptr<Indexer> indexer_;
     
-    // **新增：全局写锁**
-    // 尽管 Indexer 有锁，DBFile 也有原子写，但在高层逻辑上（写文件 -> 更新索引）
-    // 这两个步骤必须是原子的，否则可能出现数据写了但索引没更新的情况。
-    // 读操作不需要这把锁，因为 Indexer 本身支持并发读。
-    std::mutex mutex_; 
+    //用于保护 active_file_ 的写入和 indexer_ 的一致性
+    mutable std::shared_mutex rw_mutex_; 
 };
 }
