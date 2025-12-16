@@ -8,6 +8,7 @@
 #include "db_file.h"
 #include "db_common.h"
 #include "db_index.h"
+#include "db_cache.h"
 
 namespace TFDB {
 
@@ -19,6 +20,11 @@ enum Status {
     kInvalid = 4
 };
 
+struct Options {
+    std::string dir_path;
+    size_t cache_capacity = 1000;
+};
+
 class Engine{
 public:
     Engine();
@@ -26,7 +32,7 @@ public:
 
     // 打开数据库 (目前只是打开一个文件)
     // dir_path: 数据库文件所在的目录
-    static std::unique_ptr<Engine> Open(const std::string& dir_path);
+    static std::unique_ptr<Engine> Open(const Options& options);
 
     // **核心接口：写入数据**
     Status Put(const std::string& key, const std::string& value);
@@ -62,6 +68,7 @@ private:
 
     // 内存索引
     std::unique_ptr<Indexer> indexer_;
+    std::unique_ptr<LRUCache> cache_;
     
     //用于保护 active_file_ 的写入和 indexer_ 的一致性
     mutable std::shared_mutex rw_mutex_; 

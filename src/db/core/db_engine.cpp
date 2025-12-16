@@ -42,7 +42,8 @@ std::string FileName(const std::string& dir_path, uint32_t file_id) {
     return dir_path + "/" + std::string(buf);
 }
 
-Engine::Engine() : indexer_(std::make_unique<Indexer>()){}
+Engine::Engine() : indexer_(std::make_unique<Indexer>()),
+    cache_(std::make_unique<LRUCache>(1000)){} // TODO 采用了硬编码，后续因设置为配置项
 Engine::~Engine(){}
 
 std::unique_ptr<Engine> Engine::Open(const std::string& dir_path){
@@ -218,21 +219,28 @@ Status Engine::Put(const std::string& key, const std::string& value) {
     // 在持有此锁期间，没有任何其他线程可以 Read 或 Write
     std::unique_lock<std::shared_mutex> lcok(rw_mutex_); // 写锁，保护整个写入流程
 
-    // 1.1 构造 LogRecord
+    // 构造 LogRecord
     LogRecord record;
     record.key = key;
     record.value = value;
     record.type = LOG_RECORD_NORMAL;
 
-    // 1.2 追加写入磁盘
+    // 追加写入磁盘
     LogRecordPos pos;
     // AppendLogRecord 内部操作 active_file_，这是非线程安全的，所以必须在锁内
     if (!AppendLogRecord(record, &pos)) {
         return kIOError;
     }
 
-    // 1.3 更新内存索引
+    // 更新内存索引
     indexer_->Put(key, pos);
+
+    // 更新 Cache
+    // 策略 A: 更新缓存 (Update) - 适合读多写少
+    cache_->Put(key, value);
+    
+    // 策略 B: 失效缓存 (Invalidate) - 简单，适合写多读少
+    // cache_->Remove(key); 
 
     return kSuccess;
 }
@@ -240,19 +248,24 @@ Status Engine::Put(const std::string& key, const std::string& value) {
 Status Engine::Get(const std::string& key, std::string* value) {
     if (key.empty()) return kInvalid;
 
-    // 2.1 查索引 (Indexer 内部有读写锁，这里不需要加 Engine 的锁)
-    LogRecordPos pos;
-
+    // 查Cache
+    // Cache内部有锁，不需要加Engine的锁
+    auto cache_val = cache_->Get(key);
+    if(cache_val.has_value()){
+        *value = cache_val.value();
+        return kSuccess; // 命中，直接返回，不需要磁盘I/O
+    }
+    
     // Indexer::Get 内部是线程安全的 (使用 shared_lock)，
     // 但需要保证在查索引和后续读文件期间，文件不会被关闭或删除。
     // 所以在 Engine 层加一个读锁。
     std::shared_lock<std::shared_mutex> lock(rw_mutex_);
-
+    LogRecordPos pos;
     if (!indexer_->Get(key, &pos)) {
         return kKeyNotFound;
     }
 
-    // 2.2 读磁盘
+    // 读磁盘
     // 在持有读锁的情况下进行磁盘 I/O 是安全的，允许其他线程同时进行 Get。
     // 只要没有线程持有写锁（即没有 Close 或 File Rotate 发生），
     // active_file_ 和 archived_files_ 的指针就是有效的。
@@ -261,12 +274,18 @@ Status Engine::Get(const std::string& key, std::string* value) {
     try {
         LogRecord record = ReadLogRecord(pos);
         
-        // 2.3 再次检查类型 (双重保险)
         if (record.type == LOG_RECORD_DELETED) {
+            // 这里理论上不应该发生，因为 Delete 会清除 Index 和 Cache
             return kKeyNotFound;
         }
         
         *value = record.value;
+
+        // 写入 Cache (回填)
+        // 释放读锁后再写 Cache，减少锁持有时间
+        lock.unlock(); 
+        cache_->Put(key, *value);
+
         return kSuccess;
 
     } catch (const std::exception& e) {
@@ -280,26 +299,29 @@ Status Engine::Delete(const std::string& key) {
 
     std::unique_lock<std::shared_mutex> lock(rw_mutex_); // 写锁
 
-    // 3.1 // 检查 Key 是否存在 (这里虽然 Indexer 内部有锁，但我们在外部加了写锁，所以是安全的)
+    // 检查 Key 是否存在 (这里虽然 Indexer 内部有锁，但我们在外部加了写锁，所以是安全的)
     LogRecordPos dummy_pos;
     if (!indexer_->Get(key, &dummy_pos)) {
         return kKeyNotFound; // Key 本就不存在
     }
 
-    // 3.2 构造墓碑消息 (Value 为空，Type 为 DELETED)
+    // 构造墓碑消息 (Value 为空，Type 为 DELETED)
     LogRecord record;
     record.key = key;
     record.value = ""; 
     record.type = LOG_RECORD_DELETED;
 
-    // 3.3 写入磁盘 (持久化删除标记)
+    // 写入磁盘 (持久化删除标记)
     LogRecordPos pos;
     if (!AppendLogRecord(record, &pos)) {
         return kIOError;
     }
 
-    // 3.4 从内存索引中删除
+    // 从内存索引中删除
     indexer_->Delete(key);
+
+    // 从 Cache 中删除
+    cache_->Remove(key);
 
     return kSuccess;
 }
