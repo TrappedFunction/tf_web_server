@@ -183,7 +183,11 @@ int main(int argc, char* argv[]){
 
         // 3. 打开数据库引擎
         try{
-            g_db = TFDB::Engine::Open(db_path);
+            int cache_size = config.getInt("database", "cache_size", 10000);
+            TFDB::Options opts;
+            opts.dir_path = db_path;
+            opts.cache_capacity = cache_size;
+            g_db = TFDB::Engine::Open(opts);
             if(!g_db){
                 LOG_FATAL << "TFDB::Engine::Open returned null";
                 return 1;
