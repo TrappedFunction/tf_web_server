@@ -123,7 +123,9 @@ int main() {
 
     // 1. 打开数据库
     std::cout << "Opening DB at " << kDbPath << " ..." << std::endl;
-    auto db = Engine::Open(kDbPath);
+    Options op;
+    op.dir_path = kDbPath;
+    auto db = Engine::Open(op);
     if (!db) {
         std::cerr << "Failed to open DB!" << std::endl;
         return 1;

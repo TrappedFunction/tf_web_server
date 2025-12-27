@@ -29,6 +29,8 @@ add_executable(migrate_tool src/tools/migrate_data.cpp
                             src/db/core/db_file.cpp
                             src/db/core/db_index.cpp
                             src/db/core/db_codec.cpp
+                            src/db/core/db_cache.cpp
+                            src/db/core/db_iterator.cpp
                             src/utils/timestamp.cpp
 )
 
