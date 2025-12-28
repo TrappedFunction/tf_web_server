@@ -43,33 +43,48 @@
 
     <script>
         const difficultyMap = { 'Easy': '简单', 'Medium': '中等', 'Hard': '困难' };
+        let isAdmin = false;
+
+        async function fetchWithRetry(url, options = {}) {
+            try { return await fetch(url, options); } 
+            catch (err) { return await fetch(url, options); }
+        }
+
+        async function checkAuth() {
+            try {
+                const res = await fetchWithRetry('/api/admin/check');
+                const data = await res.json();
+                isAdmin = data.is_admin;
+            } catch (e) { isAdmin = false; }
+        }
 
         async function loadDetail() {
             const params = new URLSearchParams(window.location.search);
             const id = params.get('id');
-            
-            if (!id) {
-                showError("无效的题目ID");
-                return;
+            if (!id) return;
+
+            // 1. 检查权限并控制 UI
+            await checkAuth();
+            const editLink = document.getElementById('editLink');
+            if (editLink) {
+                editLink.style.display = isAdmin ? 'inline-block' : 'none';
+                editLink.href = `/edit.html?id=${id}`;
             }
 
+            // 2. 加载数据
             try {
-                const response = await fetch(`/api/problems/${id}`);
+                const response = await fetchWithRetry(`/api/problems/${id}`);
                 if (response.status === 404) {
-                    showError("未找到该题目 (404)");
+                    document.getElementById('errorMsg').innerText = "题目不存在";
+                    document.getElementById('errorMsg').style.display = 'block';
                     return;
                 }
-                
                 const p = await response.json();
                 
-                // 填充数据
                 document.getElementById('title').innerText = p.title;
-                document.getElementById('editLink').href = `/edit.html?id=${id}`;
-                
-                const diffText = difficultyMap[p.difficulty] || p.difficulty;
                 const diffSpan = document.getElementById('difficulty');
-                diffSpan.innerText = diffText;
-                diffSpan.className = `difficulty-${p.difficulty}`;
+                diffSpan.innerText = difficultyMap[p.difficulty] || p.difficulty;
+                diffSpan.className = `diff-${p.difficulty}`;
                 
                 document.getElementById('algo').innerText = p.algorithm;
                 document.getElementById('desc').innerText = p.description;
@@ -78,17 +93,11 @@
                 document.getElementById('space').innerText = p.space_complexity;
                 document.getElementById('code').innerText = p.code;
 
-                // 显示内容
                 document.getElementById('content').style.display = 'block';
             } catch (err) {
-                showError("加载失败: " + err.message);
+                document.getElementById('errorMsg').innerText = "加载失败";
+                document.getElementById('errorMsg').style.display = 'block';
             }
-        }
-
-        function showError(msg) {
-            const el = document.getElementById('errorMsg');
-            el.innerText = msg;
-            el.style.display = 'block';
         }
 
         loadDetail();

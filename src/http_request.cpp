@@ -1,6 +1,7 @@
 #include "http_request.h"
 #include <algorithm>
 #include <sstream>
+#include "utils/config.h"
 #include <iostream>
 
 HttpRequest::HttpRequest(){
@@ -42,6 +43,32 @@ std::string HttpRequest::urlDecode(const std::string& str) {
 const char* searchCRLF(const char* begin, const char* end){
     const char* crlf = std::search(begin, end, "\r\n", "\r\n"+2);
     return crlf == end ? nullptr : crlf;
+}
+
+void HttpRequest::parseCookies() {
+    std::string cookie_header = getHeader("Cookie");
+    if (cookie_header.empty()) return;
+
+    size_t start = 0;
+    while (start < cookie_header.length()) {
+        size_t end = cookie_header.find(';', start);
+        if (end == std::string::npos) end = cookie_header.length();
+
+        std::string pair = cookie_header.substr(start, end - start);
+        size_t eq_pos = pair.find('=');
+        if (eq_pos != std::string::npos) {
+            Config config;
+            std::string key = config.trim(pair.substr(0, eq_pos));
+            std::string val = config.trim(pair.substr(eq_pos + 1));
+            cookies_[key] = val;
+        }
+        start = end + 1;
+    }
+}
+
+std::string HttpRequest::getCookie(const std::string& key) const {
+    auto it = cookies_.find(key);
+    return (it != cookies_.end()) ? it->second : "";
 }
 
 bool HttpRequest::parse(Buffer* buffer){
@@ -96,9 +123,26 @@ bool HttpRequest::parse(Buffer* buffer){
             }else{
                 has_more = false;
             }
-        }else if(state_ == kExpectBody){
-            parseBody(buffer);
-            state_ = kGotALL;
+        }else if (state_ == kExpectBody) {
+            // 必须拥有完整的 Body 才算解析完成
+            // 注意：这里需要精确匹配 Content-Length
+            int content_len = std::stoi(headers_["Content-Length"]);
+            if (buffer->readableBytes() >= content_len) {
+                body_ = buffer->retrieveAsString(content_len);
+                
+                // 解析 POST 数据
+                if (method_ == POST && 
+                    headers_["Content-Type"].find("application/x-www-form-urlencoded") != std::string::npos) {
+                    parsePost();
+                }
+                
+                state_ = kGotALL;
+                has_more = false;
+            } else {
+                has_more = false; // Body 数据不足，等待
+            }
+        } 
+        else if (state_ == kGotALL) {
             has_more = false;
         }
     }

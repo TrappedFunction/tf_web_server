@@ -30,6 +30,7 @@ public:
     std::string getHeader(const std::string& key) const;
     const std::unordered_map<std::string, std::string>& getHeaders() const { return headers_; }
     const std::string& getBody() const { return body_; }
+    std::string getCookie(const std::string& key) const;
 
     // 解析POST表单数据 (x-www-form-urlencoded)
     std::string getPostValue(const std::string& key) const;
@@ -51,6 +52,9 @@ private:
     // 解析表单数据
     void parsePost();
 
+    // 解析Cookie头
+    void parseCookies();
+
     ParseState state_;
     Method method_;
     std::string path_;
@@ -63,4 +67,7 @@ private:
     std::unordered_map<std::string, std::string> post_params_;
 
     RouteParams route_params_;
+
+    // 存储 cookies
+    std::unordered_map<std::string, std::string> cookies_;
 };
