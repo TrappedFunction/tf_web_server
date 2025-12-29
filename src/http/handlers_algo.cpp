@@ -23,8 +23,8 @@ namespace Handlers {
 bool checkAdminPermission(const HttpRequest& req) {
     // 读取配置中的 Token
     Config config;
-    if (!config.load(project_root_path + "/server.ini")) return false;
-    std::string valid_token = config.getString("server", "admin_token", "default_token");
+    if (!config.load(project_root_path + "/admin.ini")) return false;
+    std::string valid_token = config.getString("admin", "admin_token", "default_token");
 
     // 获取请求中的 Cookie
     // 注意：需要在 HttpRequest 中把 parseCookies 逻辑跑通
