@@ -1,5 +1,6 @@
 #include "http/handlers.h"
 #include "http_utils.h"
+#include "utils/config.h" 
 #include "http_request.h"
 #include "utils/logger.h"
 #include "utils/json.hpp" // 引入 json 库
@@ -17,6 +18,27 @@ std::string data_path = "/data/";
 std::mutex data_mutex; // 简单的文件读写锁
 
 namespace Handlers {
+
+// 辅助函数：检查管理员权限
+bool checkAdminPermission(const HttpRequest& req) {
+    // 读取配置中的 Token
+    Config config;
+    if (!config.load(project_root_path + "/admin.ini")) return false;
+    std::string valid_token = config.getString("admin", "admin_token", "default_token");
+
+    // 获取请求中的 Cookie
+    // 注意：需要在 HttpRequest 中把 parseCookies 逻辑跑通
+    // TODO 这里简单演示，假设 req.getHeader("Cookie") 包含 "auth_token=..."
+    std::string cookie = req.getHeader("Cookie");
+    std::string token_prefix = "auth_token=" + valid_token;
+    
+    // 简单粗暴的检查：看 Cookie 字符串里有没有我们的 Token
+    // 生产环境应该用 req.getCookie("auth_token")
+    if (cookie.find(token_prefix) != std::string::npos) {
+        return true;
+    }
+    return false;
+}
 
 // 辅助函数：解析查询字符串为 map
 std::map<std::string, std::string> parseQueryString(const std::string& query) {
@@ -222,7 +244,7 @@ void handleGetProblems(const HttpRequest& req, HttpResponse* resp) {
     resp->setContentLength(resp->getBody().length());
 }
 
-// 2. 新增 API: 获取所有可用标签
+// 获取所有可用标签
 // GET /api/tags
 void handleGetAllTags(const HttpRequest& req, HttpResponse* resp) {
     std::set<std::string> unique_tags;
@@ -257,7 +279,6 @@ void handleGetAllTags(const HttpRequest& req, HttpResponse* resp) {
     resp->setContentLength(resp->getBody().length());
 }
 
-// 3. 新增 API: 收藏夹相关
 // 获取所有收藏夹
 // GET /api/favorites
 void handleGetFavorites(const HttpRequest& req, HttpResponse* resp) {
@@ -289,6 +310,10 @@ void handleGetFavorites(const HttpRequest& req, HttpResponse* resp) {
 // 创建收藏夹
 // POST /api/favorites/create (name=xxx)
 void handleCreateFavorite(const HttpRequest& req, HttpResponse* resp) {
+    if (!checkAdminPermission(req)) {
+        resp->setStatusCode(HttpResponse::k403Forbidden);
+        return;
+    }
     std::string name = req.getPostValue("name");
     if (name.empty()) {
         resp->setStatusCode(HttpResponse::k400BadRequest);
@@ -332,6 +357,10 @@ void handleCreateFavorite(const HttpRequest& req, HttpResponse* resp) {
 // 添加题目到收藏夹
 // POST /api/favorites/add (fav_id=1&problem_id=5)
 void handleAddToFavorite(const HttpRequest& req, HttpResponse* resp) {
+    if (!checkAdminPermission(req)) {
+        resp->setStatusCode(HttpResponse::k403Forbidden);
+        return;
+    }
     std::string fav_id_str = req.getPostValue("fav_id");
     std::string prob_id_str = req.getPostValue("problem_id");
 
@@ -396,6 +425,10 @@ void handleAddToFavorite(const HttpRequest& req, HttpResponse* resp) {
 // POST /api/favorites/remove
 // 参数: problem_id (必填), fav_id (选填，不填或-1表示全部移除)
 void handleRemoveFromFavorite(const HttpRequest& req, HttpResponse* resp) {
+    if (!checkAdminPermission(req)) {
+        resp->setStatusCode(HttpResponse::k403Forbidden);
+        return;
+    }
     std::string prob_id_str = req.getPostValue("problem_id");
     if (prob_id_str.empty()) {
         resp->setStatusCode(HttpResponse::k400BadRequest);
@@ -519,6 +552,14 @@ void handleGetProblemDetail(const HttpRequest& req, HttpResponse* resp) {
 // POST /api/problems
 void handleAddProblem(const HttpRequest& req, HttpResponse* resp) {
     LOG_INFO << "Handling Add Problem...";
+
+    // **权限检查**
+    if (!checkAdminPermission(req)) {
+        resp->setStatusCode(HttpResponse::k403Forbidden);
+        resp->setBody("Permission Denied");
+        resp->setContentLength(17);
+        return;
+    }
     
     // 获取 POST 参数
     std::string title = req.getPostValue("title");
@@ -595,6 +636,10 @@ void handleAddProblem(const HttpRequest& req, HttpResponse* resp) {
 
 // 前端可以通过 AJAX POST 发送一个 ID 来删除
 void handleDeleteProblem(const HttpRequest& req, HttpResponse* resp) {
+    if (!checkAdminPermission(req)) {
+        resp->setStatusCode(HttpResponse::k403Forbidden);
+        return;
+    }
     std::string id_str = req.getPostValue("id");
     int id = std::stoi(id_str);
     if (id_str.empty()) {
@@ -683,6 +728,10 @@ void handleAddQuestion(const HttpRequest& req, HttpResponse* resp) {
 // API: 修改题目
 // POST /api/problems/update
 void handleUpdateProblem(const HttpRequest& req, HttpResponse* resp) {
+    if (!checkAdminPermission(req)) {
+        resp->setStatusCode(HttpResponse::k403Forbidden);
+        return;
+    }
     std::string id_str = req.getPostValue("id");
     std::string new_algo = req.getPostValue("algorithm");
     if (id_str.empty()) {
@@ -776,6 +825,45 @@ void handleUpdateProblem(const HttpRequest& req, HttpResponse* resp) {
     }
 }
 
+// API: 管理员登录
+// POST /api/admin/login
+void handleAdminLogin(const HttpRequest& req, HttpResponse* resp) {
+    std::string password = req.getPostValue("password");
+    
+    Config config;
+    config.load(project_root_path + "/admin.ini");
+    std::string real_password = config.getString("admin", "admin_password", "");
+    std::string token = config.getString("admin", "admin_token", "");
+
+    if (password == real_password) {
+        resp->setStatusCode(HttpResponse::k200Ok);
+        // 设置 Cookie
+        // HttpOnly: 禁止 JS 读取，防止 XSS
+        // Path=/: 全站有效
+        // Max-Age: 有效期 (秒)，这里设为 1 天
+        resp->addHeader("Set-Cookie", "auth_token=" + token + "; Path=/; Max-Age=86400; HttpOnly");
+        resp->setBody("{\"status\": \"success\"}");
+    } else {
+        resp->setStatusCode(HttpResponse::k403Forbidden);
+        resp->setBody("{\"status\": \"failed\", \"msg\": \"Wrong password\"}");
+    }
+    resp->setContentType("application/json");
+    resp->setContentLength(resp->getBody().length());
+}
+
+// API: 检查当前是否为管理员 (用于前端 UI 控制)
+// GET /api/admin/check
+void handleCheckAuth(const HttpRequest& req, HttpResponse* resp) {
+    bool isAdmin = checkAdminPermission(req);
+    resp->setStatusCode(HttpResponse::k200Ok);
+    resp->setContentType("application/json");
+    if (isAdmin) {
+        resp->setBody("{\"is_admin\": true}");
+    } else {
+        resp->setBody("{\"is_admin\": false}");
+    }
+    resp->setContentLength(resp->getBody().length());
+}
 } // namespace Handlers
 
 // 注册路由
@@ -791,3 +879,5 @@ REGISTER_HANDLER("api_get_favorites", handleGetFavorites);
 REGISTER_HANDLER("api_create_favorite", handleCreateFavorite);
 REGISTER_HANDLER("api_add_to_favorite", handleAddToFavorite);
 REGISTER_HANDLER("api_remove_from_favorite", handleRemoveFromFavorite);
+REGISTER_HANDLER("api_admin_login", handleAdminLogin);
+REGISTER_HANDLER("api_check_auth", handleCheckAuth);

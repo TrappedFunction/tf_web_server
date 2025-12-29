@@ -41,10 +41,11 @@ public:
     // 检查某个节或键是否存在
     bool hasSection(const std::string& section) const;
     bool hasKey(const std::string& section, const std::string& key) const;
-
-private:
     // 辅助函数，用于去除字符串两端的空白字符
     static std::string trim(const std::string& str);
+
+private:
+    
 
     // 使用嵌套 map 来存储 INI 数据: map<section, map<key, value>>
     std::map<std::string, std::map<std::string, std::string>> data_;

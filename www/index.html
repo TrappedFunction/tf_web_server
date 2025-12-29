@@ -10,7 +10,7 @@
     <div class="navbar">
         <h1> TF韩术-算法题解库</h1>
         <div class="nav-links">
-            <a href="/add.html">➕ 添加题解</a>
+            <a href="/add.html" id="nav-add-btn" style="display:none;">➕ 添加题解</a>
             <a href="/qa.html">💬 提问箱</a>
         </div>
     </div>
@@ -76,6 +76,8 @@
     
     <script>
         const difficultyMap = { 'Easy': '简单', 'Medium': '中等', 'Hard': '困难' };
+
+        let isAdmin = false; // 权限状态
         let currentFavId = -1; // -1 表示全部
         // 分页状态
         let currentOffset = 0;
@@ -88,7 +90,7 @@
 
         function handleEnter(e) { if (e.key === 'Enter') resetAndLoad(); }
 
-        // **新增：封装 fetch，支持自动重试一次**
+        // 封装 fetch，支持自动重试一次**
         async function fetchWithRetry(url, options = {}, retries = 1, timeout = 5000) {
             const fetchWithTimeout = (url, options) => {
                 const controller = new AbortController();
@@ -128,9 +130,28 @@
 
         // ---------------- 初始化加载 ----------------
         async function init() {
+            await checkAuth(); // 1. 检查权限
+            updateUI();        // 2. 更新静态UI (导航栏)
             await loadTags();
             await loadSidebar();
             resetAndLoad();
+        }
+
+        // --- 权限检查 ---
+        async function checkAuth() {
+            try {
+                const res = await fetchWithRetry('/api/admin/check');
+                const data = await res.json();
+                isAdmin = data.is_admin;
+            } catch (e) {
+                console.error("Auth check failed", e);
+                isAdmin = false;
+            }
+        }
+
+        function updateUI() {
+            const addBtn = document.getElementById('nav-add-btn');
+            if (addBtn) addBtn.style.display = isAdmin ? 'inline-block' : 'none';
         }
 
         // 初始化侧边栏
@@ -251,6 +272,18 @@
                     const diffText = difficultyMap[p.difficulty] || p.difficulty;
                     const algoText = p.algorithm || (p.tags ? p.tags.join(', ') : '-');
                     const favClass = p.is_favorited ? 'btn-fav active' : 'btn-fav';
+                    
+                    let actionHtml = '';
+                    if (isAdmin) {
+                        const favClass = p.is_favorited ? 'btn-fav active' : 'btn-fav';
+                        actionHtml = `
+                            <button class="${favClass}" onclick="handleFavClick(${p.id}, ${p.is_favorited}, event)" title="收藏">★</button>
+                            <button onclick="deleteProblem(${p.id}, event)" style="border:none; background:none; cursor:pointer; color:#ccc;" title="删除">🗑️</button>
+                        `;
+                    } else {
+                        // 普通用户列为空，或者你可以放一个查看详情的按钮
+                        actionHtml = `<span style="color:#eee;">-</span>`; 
+                    }
 
                     const row = document.createElement('div');
                     row.className = 'list-row';
@@ -263,9 +296,8 @@
                         <div class="col-algo">${algoText}</div>
                         <div class="col-diff ${diffClass}">${diffText}</div>
                         <div class="col-action">
-                        <button class="${favClass}" onclick="handleFavClick(${p.id}, ${p.is_favorited}, event)" title="收藏">★</button>
-                        <button onclick="deleteProblem(${p.id}, event)" style="..." title="删除">🗑️</button>
-                    </div>
+                            ${actionHtml}
+                        </div>
                 `;
                     listDiv.appendChild(row);
                 });
@@ -274,6 +306,8 @@
                 if (currentOffset >= total) {
                     hasMore = false;
                     sentinel.innerText = "—— 到底了 ——";
+                }else {
+                    sentinel.innerText = "正在加载更多...";
                 }
 
             } catch (err) {
@@ -287,6 +321,11 @@
         // 点击星星的逻辑入口
         async function handleFavClick(id, isFav, event) {
             event.stopPropagation();
+
+            if (!isAdmin) {
+                return; // 直接忽略点击
+            }
+
             currentProblemIdToFav = id;
             openManageFavModal(id);
         }
@@ -390,9 +429,6 @@
         // 切换收藏状态 (核心逻辑)
         async function toggleFav(favId, isChecked) {
             const url = isChecked ? '/api/favorites/add' : '/api/favorites/remove';
-            // 如果是 remove，我们之前的 API 参数是 problem_id + fav_id
-            // 如果是 add，参数是 problem_id + fav_id
-            // 参数名完全一致，完美！
             
             try {
                 const res = await fetchWithRetry(url, {
